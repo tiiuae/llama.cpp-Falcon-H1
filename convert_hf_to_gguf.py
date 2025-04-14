@@ -298,7 +298,8 @@ class Model:
             for new_name, data_torch in (self.modify_tensors(data_torch, name, bid)):
                 # TODO: why do we squeeze here?
                 # data = data_torch.squeeze().numpy()
-                data = data_torch.numpy()
+                # data = data_torch.numpy()
+                data = self.reshape_tensors(data_torch, new_name, bid).numpy()
 
                 # if data ends up empty, it means data_torch was a scalar tensor -> restore
                 if len(data.shape) == 0:
@@ -520,7 +521,10 @@ class Model:
 
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.dir_model)
-        vocab_size = self.hparams.get("vocab_size", len(tokenizer.vocab))
+        vocab_size = max(
+            self.hparams.get("vocab_size", len(tokenizer.vocab)),
+            len(tokenizer.vocab)
+        )
         assert max(tokenizer.vocab.values()) < vocab_size
 
         tokpre = self.get_vocab_base_pre(tokenizer)
@@ -597,6 +601,9 @@ class Model:
         if chkhsh == "0876d13b50744004aa9aeae05e7b0647eac9d801b5ba4668afc01e709c15e19f":
             # ref: https://huggingface.co/BAAI/bge-small-en-v1.5
             res = "bert-bge"
+        if chkhsh == "a6b57017d60e6edb4d88ecc2845188e0eb333a70357e45dcc9b53964a73bbae6":
+            # ref: 
+            res = "falcon-mamba2"
         if chkhsh == "8e62295832751ca1e8f92f2226f403dea30dc5165e448b5bfa05af5340c64ec7":
             # ref: https://huggingface.co/BAAI/bge-large-zh-v1.5
             res = "bert-bge-large"
@@ -3522,11 +3529,9 @@ class MambaModel(Model):
         self.gguf_writer.add_embedding_length(d_model)
         self.gguf_writer.add_feed_forward_length(0) # unused, but seemingly required when loading
         self.gguf_writer.add_head_count(0) # unused, but seemingly required when loading
-        self.gguf_writer.add_block_count(self.block_count)
         self.gguf_writer.add_ssm_conv_kernel(d_conv)
         self.gguf_writer.add_ssm_inner_size(d_inner)
         self.gguf_writer.add_ssm_state_size(d_state)
-        self.gguf_writer.add_ssm_time_step_rank(dt_rank)
         self.gguf_writer.add_layer_norm_rms_eps(rms_norm_eps)
         self.gguf_writer.add_ssm_dt_b_c_rms(use_dt_b_c_norm) # For classic Mamba we don't apply rms norm on B / DT layers
         self.gguf_writer.add_file_type(self.ftype)
@@ -3554,6 +3559,206 @@ class MambaModel(Model):
             self._tok_embd = data_torch
 
         return [(new_name, data_torch)]
+
+@Model.register("Mamba2ForCausalLM")
+class Mamba2Model(Model):
+    model_arch = gguf.MODEL_ARCH.MAMBA2
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # n_groups and d_inner are used during reshaping
+        self.d_model = self.find_hparam(["hidden_size", "d_model", "dim"])
+        self.n_group = self.find_hparam(["n_groups"], optional=True) or 1
+        self.d_inner = self.find_hparam(["intermediate_size", "d_inner"], optional=True) or 2 * self.d_model
+
+    def set_vocab(self):
+        vocab_size = self.hparams["vocab_size"]
+        # Round vocab size to next multiple of 16
+        pad_vocab = self.hparams.get("pad_vocab_size_multiple", 16)
+        # pad using ceiling division
+        # ref: https://stackoverflow.com/a/17511341/22827863
+        vocab_size = -(vocab_size // -pad_vocab) * pad_vocab
+        self.hparams["vocab_size"] = vocab_size
+
+        if (self.dir_model / "tokenizer.model").is_file():
+            self._set_vocab_sentencepiece()
+        elif (self.dir_model / "tokenizer.model.v3").is_file():
+            # mamba-codestral
+            raise NotImplementedError(f"Please rename {self.dir_model / 'tokenizer.model.v3'} to {self.dir_model / 'tokenizer.model'}")
+        elif (self.dir_model / "tokenizer.json").is_file():
+            self._set_vocab_gpt2()
+        else:
+            # Use the GPT-NeoX tokenizer when no tokenizer files are present
+            self._set_vocab_builtin("gpt-neox", vocab_size)
+
+    def set_gguf_parameters(self):
+        d_conv  = self.find_hparam(["conv_kernel", "d_conv"],             optional=True) or 4
+        d_state = self.find_hparam(["state_size",  "d_state"],            optional=True) or 128
+        head_dim = self.find_hparam(["head_dim"],                         optional=True) or 64
+
+        rms_norm_eps = self.find_hparam(["layer_norm_epsilon", "rms_norm_eps"], optional=True) or 1e-5
+
+        # Fail early for models which don't have a block expansion factor of 2
+        # TODO: does this really matter?
+        assert self.d_inner == 2 * self.d_model
+        assert self.d_inner % head_dim == 0
+
+        self.gguf_writer.add_embedding_length(self.d_model)
+        self.gguf_writer.add_ssm_state_size(d_state)
+        self.gguf_writer.add_file_type(self.ftype)
+
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        del bid  # unused
+
+        if name.startswith("model.backbone") or name.startswith("model.lm_head"):
+            # map Mamba-Codestral-7B-v0.1 tensor names to the names used by Mamba-2
+            name = name.removeprefix("model.")
+
+        if name.endswith(".dt_bias"):
+            name = name.rpartition(".dt_bias")[0] + ".dt_proj.bias"
+
+        new_name = self.map_tensor_name(name)
+
+        if name.endswith(".A_log"):
+            logger.debug("A_log --> A ==> " + new_name)
+            data_torch = -torch.exp(data_torch)
+
+        yield (new_name, data_torch)
+
+    def reshape_tensors(self, data_torch: Tensor, new_name: str, bid: int | None) -> Tensor:
+        if any(self.match_model_tensor_name(new_name, t, bid, suffix="") for t in [
+            gguf.MODEL_TENSOR.SSM_A,
+            gguf.MODEL_TENSOR.SSM_D,
+        ]):
+            # unsqueeze A to use similar shape semantics as Mamba-1
+            # (D is also unsqueezed, but for more straightforward broadcast internally)
+            return data_torch.reshape((*data_torch.shape, 1))
+
+        elif self.match_model_tensor_name(new_name, gguf.MODEL_TENSOR.SSM_NORM, bid):
+            return data_torch.reshape((self.n_group, self.d_inner // self.n_group))
+
+        return data_torch.squeeze()
+
+
+@Model.register("FalconMamba2ForCausalLM")
+class FalconMamba2Model(Mamba2Model):
+    model_arch = gguf.MODEL_ARCH.FALCON_MAMBA2
+
+    def __init__(self, *args, **kwargs):
+
+        # Set the hparam prefixes for Falcon Mamba2
+        self.hparam_prefixes = ["mamba"]
+        
+        # Initialize the base Mamba2Model
+        super().__init__(*args, **kwargs)
+        
+        # Use Llama conversion for attention
+        self._transformer_model_class: type[Model] = LlamaModel
+        
+        # n_group and d_inner are used during reshape_tensors for mamaba2
+        self.d_model = self.find_hparam(["hidden_size", "d_model"])
+        self.n_group = self.find_hparam(["n_groups"])
+        self.d_inner = self.find_hparam(["expand"]) * self.d_model
+        
+        # Initialize any Falcon Mamba2 specific attributes
+        self.has_attention = True  # Falcon Mamba2 has attention components
+        
+        # Load SSM multipliers from hyperparameters
+        self.ssm_multipliers = self.find_hparam(["ssm_multipliers"], optional=True)
+        
+        # Load Falcon-Mamba2 multipliers from hyperparameters
+        self.attention_in_multiplier = self.find_hparam(["attention_in_multiplier"], optional=True)
+        self.attention_out_multiplier = self.find_hparam(["attention_out_multiplier"], optional=True)
+        self.ssm_in_multiplier = self.find_hparam(["ssm_in_multiplier"], optional=True)
+        self.ssm_out_multiplier = self.find_hparam(["ssm_out_multiplier"], optional=True)
+        self.mlp_multipliers = self.find_hparam(["mlp_multipliers"], optional=True)
+        self.ssm_multipliers = self.find_hparam(["ssm_multipliers"], optional=True)
+
+    def find_hparam(self, keys: Iterable[str], *args, **kwargs) -> Any:
+        prefixed = []
+        for pfx in self.hparam_prefixes:
+            prefixed.extend(
+                "_".join([pfx, k])
+                for k in keys
+            )
+        keys = list(keys) + prefixed
+        return super().find_hparam(keys, *args, **kwargs)
+
+    def set_gguf_parameters(self):
+        super().set_gguf_parameters()
+        
+        ## General Params ##
+        self.gguf_writer.add_block_count(self.block_count)
+        self.gguf_writer.add_context_length(self.hparams.get("max_position_embeddings", 0))
+        self.gguf_writer.add_vocab_size(self.hparams["vocab_size"])
+        self.gguf_writer.add_feed_forward_length(self.hparams["intermediate_size"])
+
+        ## Mamba mixer params ##
+        self.gguf_writer.add_ssm_conv_kernel(self.find_hparam(["conv_kernel", "d_conv"]))
+        self.gguf_writer.add_ssm_group_count(self.n_group)
+        self.gguf_writer.add_ssm_inner_size(self.d_inner)
+        self.gguf_writer.add_ssm_head_dim(d_head := self.find_hparam(["d_head"]))
+        # NOTE: The mamba_dt_rank is _not_ the right field for how this is used
+        #   in llama.cpp
+        self.gguf_writer.add_ssm_time_step_rank(self.find_hparam(["n_heads"]))
+
+        ## Attention params ##
+        self.gguf_writer.add_head_count(self.hparams["num_attention_heads"])
+        self.gguf_writer.add_head_count_kv(self.find_hparam(["num_key_value_heads", "n_head_kv"]))
+
+        ## Feed Forward Params ##
+        self.gguf_writer.add_layer_norm_rms_eps(
+            self.find_hparam(["layer_norm_epsilon", "rms_norm_eps"], optional=True) or 1e-5
+        )
+        
+        ## Validation ##
+        assert self.hparams.get("hidden_act") in [None, "silu"], "Only SILU activation supported"
+        assert self.d_inner % d_head == 0, f"SSM inner size {self.d_inner} not a multiple of head dim {d_head}"
+
+        
+        # Add Falcon Mamba2 specific configuration
+        self.gguf_writer.add_uint32("falcon_mamba2.num_attention_heads", self.find_hparam(["num_attention_heads"]))
+        self.gguf_writer.add_uint32("falcon_mamba2.num_key_value_heads", 
+                                    self.find_hparam(["num_key_value_heads"], optional=True) or 
+                                    self.find_hparam(["num_attention_heads"]))
+        
+        # Add multipliers as metadata instead of tensors
+        self.gguf_writer.add_float32("falcon_mamba2.attention_in_multiplier", self.attention_in_multiplier)
+        self.gguf_writer.add_float32("falcon_mamba2.attention_out_multiplier", self.attention_out_multiplier)
+        self.gguf_writer.add_float32("falcon_mamba2.ssm_in_multiplier", self.ssm_in_multiplier)
+        self.gguf_writer.add_float32("falcon_mamba2.ssm_out_multiplier", self.ssm_out_multiplier)
+        
+        # Add MLP multipliers
+        if isinstance(self.mlp_multipliers, (list, tuple)) and len(self.mlp_multipliers) == 2:
+            self.gguf_writer.add_float32("falcon_mamba2.mlp_gate_multiplier", self.mlp_multipliers[0])
+            self.gguf_writer.add_float32("falcon_mamba2.mlp_down_multiplier", self.mlp_multipliers[1])
+        
+        # Add SSM multipliers if present
+        if self.ssm_multipliers is not None:
+            if isinstance(self.ssm_multipliers, (list, tuple)):
+                for i, mult in enumerate(self.ssm_multipliers):
+                    self.gguf_writer.add_float32(f"falcon_mamba2.ssm_multipliers.{i}", float(mult))
+            else:
+                self.gguf_writer.add_float32("falcon_mamba2.ssm_multipliers", float(self.ssm_multipliers))
+        
+        # Add any other Falcon Mamba2 specific configuration
+        falcon_specific_params = [
+            ("mamba_use_mlp", "falcon_mamba2.mamba_use_mlp", "bool"),
+            ("mamba_norm_before_gate", "falcon_mamba2.mamba_norm_before_gate", "bool"),
+            ("mamba_rms_norm", "falcon_mamba2.mamba_rms_norm", "bool"),
+            ("rope_theta", "falcon_mamba2.rope_theta", "float"),
+        ]
+        
+        for param_name, gguf_key, param_type in falcon_specific_params:
+            value = self.find_hparam([param_name], optional=True)
+            if value is not None:
+                if param_type == "bool":
+                    self.gguf_writer.add_bool(gguf_key, value)
+                elif param_type == "float":
+                    self.gguf_writer.add_float32(gguf_key, value)
+                elif param_type == "uint32":
+                    self.gguf_writer.add_uint32(gguf_key, value)
 
 
 @Model.register("CohereForCausalLM")
