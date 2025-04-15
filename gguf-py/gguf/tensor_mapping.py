@@ -253,9 +253,10 @@ class TensorNameMap:
             "transformer.layers.{bid}.ffn_norm",                             # openelm
         ),
 
-        # Post feed-forward norm
+        # Pre feed-forward norm
         MODEL_TENSOR.FFN_PRE_NORM: (
             "model.layers.{bid}.pre_feedforward_layernorm", # gemma2
+            "model.layers.{bid}.pre_ff_layernorm.weight",   # falcon-mamba2
         ),
 
         # Post feed-forward norm
@@ -307,6 +308,7 @@ class TensorNameMap:
             "model.layers.{bid}.residual_mlp.w3",                     # arctic
             "encoder.layers.{bid}.mlp.dense_h_to_4h",                 # chatglm
             "transformer.h.{bid}.mlp.c_fc_1",                         # exaone
+            "model.layers.{bid}.feed_forward.up_proj",                # falcon-mamba2
         ),
 
         MODEL_TENSOR.FFN_UP_EXP: (
@@ -340,6 +342,7 @@ class TensorNameMap:
             "transformer.h.{bid}.mlp.linear_1",           # refact
             "model.layers.{bid}.residual_mlp.w1",         # arctic
             "transformer.h.{bid}.mlp.c_fc_0",             # exaone
+            "model.layers.{bid}.feed_forward.gate_proj",  # falcon-mamba2
         ),
 
         MODEL_TENSOR.FFN_GATE_EXP: (
@@ -381,6 +384,7 @@ class TensorNameMap:
             "encoder.layer.{bid}.mlp.down_layer",                     # jina-bert-v2
             "encoder.layers.{bid}.mlp.dense_4h_to_h",                 # chatglm
             "model.layers.h.{bid}.mlp.c_proj",                        # exaone
+            "model.layers.{bid}.feed_forward.down_proj",              # falcon-mamba2
         ),
 
         MODEL_TENSOR.FFN_DOWN_EXP: (
@@ -427,14 +431,20 @@ class TensorNameMap:
             "encoder.layer.{bid}.layer_norm_2"              # jina-v2-code
         ),
 
+        MODEL_TENSOR.FINAL_NORM: (
+            "model.final_layernorm",                 # falcon-mamba2
+        ),
+
         MODEL_TENSOR.SSM_IN: (
             "model.layers.{bid}.in_proj",
             "backbone.layers.{bid}.mixer.in_proj",
+            "model.layers.{bid}.mamba.in_proj",            # falcon-mamba2
         ),
 
         MODEL_TENSOR.SSM_CONV1D: (
             "model.layers.{bid}.conv1d",
             "backbone.layers.{bid}.mixer.conv1d",
+            "model.layers.{bid}.mamba.conv1d",            # falcon-mamba2
         ),
 
         MODEL_TENSOR.SSM_X: (
@@ -445,21 +455,25 @@ class TensorNameMap:
         MODEL_TENSOR.SSM_DT: (
             "model.layers.{bid}.dt_proj",
             "backbone.layers.{bid}.mixer.dt_proj",
+            "model.layers.{bid}.mamba.dt_proj",            # falcon-mamba2
         ),
 
         MODEL_TENSOR.SSM_A: (
             "model.layers.{bid}.A_log",
             "backbone.layers.{bid}.mixer.A_log",
+            "model.layers.{bid}.mamba.A_log",            # falcon-mamba2
         ),
 
         MODEL_TENSOR.SSM_D: (
             "model.layers.{bid}.D",
             "backbone.layers.{bid}.mixer.D",
+            "model.layers.{bid}.mamba.D",            # falcon-mamba2
         ),
 
         MODEL_TENSOR.SSM_OUT: (
             "model.layers.{bid}.out_proj",
             "backbone.layers.{bid}.mixer.out_proj",
+            "model.layers.{bid}.mamba.out_proj",            # falcon-mamba2
         ),
 
         MODEL_TENSOR.TIME_MIX_W1: (

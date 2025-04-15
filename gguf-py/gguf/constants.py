@@ -157,6 +157,8 @@ class Keys:
         STATE_SIZE     = "{arch}.ssm.state_size"
         TIME_STEP_RANK = "{arch}.ssm.time_step_rank"
         DT_B_C_RMS     = "{arch}.ssm.dt_b_c_rms"
+        GROUP_COUNT    = "{arch}.ssm.group_count"
+        HEAD_DIM       = "{arch}.ssm.head_dim"
 
     class WKV:
         HEAD_SIZE = "{arch}.wkv.head_size"
@@ -257,6 +259,8 @@ class MODEL_ARCH(IntEnum):
     RWKV6            = auto()
     RWKV6QWEN2       = auto()
     MAMBA            = auto()
+    MAMBA2           = auto()
+    FALCON_MAMBA2    = auto()
     XVERSE           = auto()
     COMMAND_R        = auto()
     COHERE2          = auto()
@@ -321,12 +325,14 @@ class MODEL_TENSOR(IntEnum):
     ATTN_Q_NORM          = auto()
     ATTN_K_NORM          = auto()
     LAYER_OUT_NORM       = auto()
+    FINAL_NORM           = auto()
     SSM_IN               = auto()
     SSM_CONV1D           = auto()
     SSM_X                = auto()
     SSM_DT               = auto()
     SSM_A                = auto()
     SSM_D                = auto()
+    SSM_NORM             = auto()
     SSM_OUT              = auto()
     TIME_MIX_W1          = auto()
     TIME_MIX_W2          = auto()
@@ -444,6 +450,8 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.RWKV6:            "rwkv6",
     MODEL_ARCH.RWKV6QWEN2:       "rwkv6qwen2",
     MODEL_ARCH.MAMBA:            "mamba",
+    MODEL_ARCH.MAMBA2:           "mamba2",
+    MODEL_ARCH.FALCON_MAMBA2:    "falcon-mamba2",
     MODEL_ARCH.XVERSE:           "xverse",
     MODEL_ARCH.COMMAND_R:        "command-r",
     MODEL_ARCH.COHERE2:          "cohere2",
@@ -508,12 +516,14 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.FFN_UP_EXP:                "blk.{bid}.ffn_up_exps",
     MODEL_TENSOR.FFN_EXP_PROBS_B:           "blk.{bid}.exp_probs_b",
     MODEL_TENSOR.LAYER_OUT_NORM:            "blk.{bid}.layer_output_norm",
+    MODEL_TENSOR.FINAL_NORM:                "blk.final_layer_norm",
     MODEL_TENSOR.SSM_IN:                    "blk.{bid}.ssm_in",
     MODEL_TENSOR.SSM_CONV1D:                "blk.{bid}.ssm_conv1d",
     MODEL_TENSOR.SSM_X:                     "blk.{bid}.ssm_x",
     MODEL_TENSOR.SSM_DT:                    "blk.{bid}.ssm_dt",
     MODEL_TENSOR.SSM_A:                     "blk.{bid}.ssm_a",
     MODEL_TENSOR.SSM_D:                     "blk.{bid}.ssm_d",
+    MODEL_TENSOR.SSM_NORM:                  "blk.{bid}.ssm_norm",
     MODEL_TENSOR.SSM_OUT:                   "blk.{bid}.ssm_out",
     MODEL_TENSOR.TIME_MIX_W1:               "blk.{bid}.time_mix_w1",
     MODEL_TENSOR.TIME_MIX_W2:               "blk.{bid}.time_mix_w2",
@@ -1165,6 +1175,55 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.SSM_A,
         MODEL_TENSOR.SSM_D,
         MODEL_TENSOR.SSM_OUT,
+    ],
+    MODEL_ARCH.MAMBA2: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.OUTPUT,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.SSM_IN,
+        MODEL_TENSOR.SSM_CONV1D,
+        MODEL_TENSOR.SSM_DT,
+        MODEL_TENSOR.SSM_A,
+        MODEL_TENSOR.SSM_D,
+        MODEL_TENSOR.SSM_NORM,
+        MODEL_TENSOR.SSM_OUT,
+    ],
+    MODEL_ARCH.FALCON_MAMBA2: [
+        # Token embedding
+        MODEL_TENSOR.TOKEN_EMBD,
+        
+        # Pre-feedforward layernorm
+        MODEL_TENSOR.FFN_PRE_NORM,
+        
+        # Final layer norm and output
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.OUTPUT,
+        
+        # Per-layer tensors (these will be indexed by block ID)
+        # Attention components
+        MODEL_TENSOR.ATTN_NORM,      # Input layernorm for attention
+        MODEL_TENSOR.ATTN_Q,         # Query projection
+        MODEL_TENSOR.ATTN_K,         # Key projection
+        MODEL_TENSOR.ATTN_V,         # Value projection
+        MODEL_TENSOR.ATTN_OUT,       # Output projection
+        
+        # SSM components (Mamba2 specific)
+        MODEL_TENSOR.SSM_IN,         # Input projection for SSM
+        MODEL_TENSOR.SSM_CONV1D,     # Convolution layer
+        MODEL_TENSOR.SSM_DT,         # Delta time projection
+        MODEL_TENSOR.SSM_A,          # A parameter (log form)
+        MODEL_TENSOR.SSM_D,          # D parameter
+        MODEL_TENSOR.SSM_NORM,       # Normalization in SSM
+        MODEL_TENSOR.SSM_OUT,        # Output projection
+        
+        # Feed-forward network components
+        MODEL_TENSOR.FFN_NORM,       # Normalization before FFN
+        MODEL_TENSOR.FFN_GATE,       # Gate projection (SwiGLU)
+        MODEL_TENSOR.FFN_DOWN,       # Down projection
+        MODEL_TENSOR.FFN_UP,         # Up projection
+        
+        MODEL_TENSOR.FINAL_NORM,     # Final layernorm
     ],
     MODEL_ARCH.XVERSE: [
         MODEL_TENSOR.TOKEN_EMBD,

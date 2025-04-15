@@ -3718,36 +3718,36 @@ class FalconMamba2Model(Mamba2Model):
 
         
         # Add Falcon Mamba2 specific configuration
-        self.gguf_writer.add_uint32("falcon_mamba2.num_attention_heads", self.find_hparam(["num_attention_heads"]))
-        self.gguf_writer.add_uint32("falcon_mamba2.num_key_value_heads", 
+        self.gguf_writer.add_uint32("falcon-mamba2.num_attention_heads", self.find_hparam(["num_attention_heads"]))
+        self.gguf_writer.add_uint32("falcon-mamba2.num_key_value_heads", 
                                     self.find_hparam(["num_key_value_heads"], optional=True) or 
                                     self.find_hparam(["num_attention_heads"]))
         
         # Add multipliers as metadata instead of tensors
-        self.gguf_writer.add_float32("falcon_mamba2.attention_in_multiplier", self.attention_in_multiplier)
-        self.gguf_writer.add_float32("falcon_mamba2.attention_out_multiplier", self.attention_out_multiplier)
-        self.gguf_writer.add_float32("falcon_mamba2.ssm_in_multiplier", self.ssm_in_multiplier)
-        self.gguf_writer.add_float32("falcon_mamba2.ssm_out_multiplier", self.ssm_out_multiplier)
+        self.gguf_writer.add_float32("falcon-mamba2.attention_in_multiplier", self.attention_in_multiplier)
+        self.gguf_writer.add_float32("falcon-mamba2.attention_out_multiplier", self.attention_out_multiplier)
+        self.gguf_writer.add_float32("falcon-mamba2.ssm_in_multiplier", self.ssm_in_multiplier)
+        self.gguf_writer.add_float32("falcon-mamba2.ssm_out_multiplier", self.ssm_out_multiplier)
         
         # Add MLP multipliers
         if isinstance(self.mlp_multipliers, (list, tuple)) and len(self.mlp_multipliers) == 2:
-            self.gguf_writer.add_float32("falcon_mamba2.mlp_gate_multiplier", self.mlp_multipliers[0])
-            self.gguf_writer.add_float32("falcon_mamba2.mlp_down_multiplier", self.mlp_multipliers[1])
+            self.gguf_writer.add_float32("falcon-mamba2.mlp_gate_multiplier", self.mlp_multipliers[0])
+            self.gguf_writer.add_float32("falcon-mamba2.mlp_down_multiplier", self.mlp_multipliers[1])
         
         # Add SSM multipliers if present
         if self.ssm_multipliers is not None:
             if isinstance(self.ssm_multipliers, (list, tuple)):
                 for i, mult in enumerate(self.ssm_multipliers):
-                    self.gguf_writer.add_float32(f"falcon_mamba2.ssm_multipliers.{i}", float(mult))
+                    self.gguf_writer.add_float32(f"falcon-mamba2.ssm_multipliers.{i}", float(mult))
             else:
-                self.gguf_writer.add_float32("falcon_mamba2.ssm_multipliers", float(self.ssm_multipliers))
+                self.gguf_writer.add_float32("falcon-mamba2.ssm_multipliers", float(self.ssm_multipliers))
         
         # Add any other Falcon Mamba2 specific configuration
         falcon_specific_params = [
-            ("mamba_use_mlp", "falcon_mamba2.mamba_use_mlp", "bool"),
-            ("mamba_norm_before_gate", "falcon_mamba2.mamba_norm_before_gate", "bool"),
-            ("mamba_rms_norm", "falcon_mamba2.mamba_rms_norm", "bool"),
-            ("rope_theta", "falcon_mamba2.rope_theta", "float"),
+            ("mamba_use_mlp", "falcon-mamba2.mamba_use_mlp", "bool"),
+            ("mamba_norm_before_gate", "falcon-mamba2.mamba_norm_before_gate", "bool"),
+            ("mamba_rms_norm", "falcon-mamba2.mamba_rms_norm", "bool"),
+            ("rope_theta", "falcon-mamba2.rope_theta", "float"),
         ]
         
         for param_name, gguf_key, param_type in falcon_specific_params:
