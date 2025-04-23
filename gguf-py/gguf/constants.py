@@ -326,6 +326,7 @@ class MODEL_TENSOR(IntEnum):
     ATTN_K_NORM          = auto()
     LAYER_OUT_NORM       = auto()
     FINAL_NORM           = auto()
+    SSM_MUP_VEC          = auto()
     SSM_IN               = auto()
     SSM_CONV1D           = auto()
     SSM_X                = auto()
@@ -518,6 +519,7 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.LAYER_OUT_NORM:            "blk.{bid}.layer_output_norm",
     MODEL_TENSOR.FINAL_NORM:                "blk.final_layer_norm",
     MODEL_TENSOR.SSM_IN:                    "blk.{bid}.ssm_in",
+    MODEL_TENSOR.SSM_MUP_VEC:               "blk.{bid}.ssm_mup_vec",
     MODEL_TENSOR.SSM_CONV1D:                "blk.{bid}.ssm_conv1d",
     MODEL_TENSOR.SSM_X:                     "blk.{bid}.ssm_x",
     MODEL_TENSOR.SSM_DT:                    "blk.{bid}.ssm_dt",
@@ -1209,6 +1211,7 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.ATTN_OUT,       # Output projection
         
         # SSM components (Mamba2 specific)
+        MODEL_TENSOR.SSM_MUP_VEC,    # Mup vector
         MODEL_TENSOR.SSM_IN,         # Input projection for SSM
         MODEL_TENSOR.SSM_CONV1D,     # Convolution layer
         MODEL_TENSOR.SSM_DT,         # Delta time projection

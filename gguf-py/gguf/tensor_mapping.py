@@ -435,6 +435,10 @@ class TensorNameMap:
             "model.final_layernorm",                 # falcon-mamba2
         ),
 
+        MODEL_TENSOR.SSM_MUP_VEC: (
+            "model.layers.{bid}.mamba.mup_vector",            # falcon-mamba2
+        ),
+
         MODEL_TENSOR.SSM_IN: (
             "model.layers.{bid}.in_proj",
             "backbone.layers.{bid}.mixer.in_proj",

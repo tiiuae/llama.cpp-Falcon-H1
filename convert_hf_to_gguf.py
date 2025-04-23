@@ -3644,9 +3644,18 @@ class Mamba2Model(Model):
 @Model.register("FalconMamba2ForCausalLM")
 class FalconMamba2Model(Mamba2Model):
     model_arch = gguf.MODEL_ARCH.FALCON_MAMBA2
+    
+    @staticmethod
+    def _add_model_tensors():
+        # Register the MUP vector tensor in the model architecture
+        gguf.MODEL_TENSORS[gguf.MODEL_ARCH.FALCON_MAMBA2].append(gguf.MODEL_TENSOR.SSM_MUP_VEC)
+        # Register the tensor name
+        gguf.TENSOR_NAMES[gguf.MODEL_TENSOR.SSM_MUP_VEC] = "blk.{bid}.ssm_mup_vec"
 
     def __init__(self, *args, **kwargs):
-
+        # Add the model tensors for Falcon Mamba2
+        self._add_model_tensors()
+        
         # Set the hparam prefixes for Falcon Mamba2
         self.hparam_prefixes = ["mamba"]
         
@@ -3684,6 +3693,37 @@ class FalconMamba2Model(Mamba2Model):
             )
         keys = list(keys) + prefixed
         return super().find_hparam(keys, *args, **kwargs)
+
+    def init_mup_vector(self):
+        zxbcdt_multipliers = self.hparams["ssm_multipliers"]
+        intermediate_size = self.hparams["mamba_d_ssm"]
+        groups_time_state_size = self.hparams["mamba_n_groups"] * self.hparams["mamba_d_state"]
+        vector_shape = (
+                2 * intermediate_size + 2 * groups_time_state_size + self.hparams["mamba_n_heads"]
+            )
+        mup_vector = torch.ones(1, 1, vector_shape)
+        mup_vector[:, :, :intermediate_size] *= zxbcdt_multipliers[0]
+        mup_vector[:, :, intermediate_size:2 * intermediate_size] *= zxbcdt_multipliers[1]
+        mup_vector[:, :, 2 * intermediate_size:2 * intermediate_size + groups_time_state_size] *= zxbcdt_multipliers[2]
+        mup_vector[:, :, 2 * intermediate_size + groups_time_state_size:2 * intermediate_size + 2 * groups_time_state_size] *= zxbcdt_multipliers[3]
+        mup_vector[:, :, 2 * intermediate_size + 2 * groups_time_state_size:] *= zxbcdt_multipliers[4]
+        return mup_vector
+
+    def generate_extra_tensors(self) -> Iterable[tuple[str, Tensor]]:
+        yield from super().generate_extra_tensors()
+        
+        # Generate MUP vector for each layer
+        for i in range(self.block_count):
+            mup_vector = self.init_mup_vector()
+            yield (f"model.layers.{i}.mamba.mup_vector", mup_vector)
+
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        if name.endswith(".mamba.mup_vector"):
+            # Extract block id from the name
+            block_id = int(name.split(".")[2])
+            new_name = f"blk.{block_id}.ssm_mup_vec"
+            return [(new_name, data_torch)]
+        return super().modify_tensors(data_torch, name, bid)
 
     def set_gguf_parameters(self):
         super().set_gguf_parameters()
