@@ -3738,6 +3738,7 @@ class FalconMamba2Model(Mamba2Model):
         
         # Add SSM multipliers if present
         if self.ssm_multipliers is not None:
+            self.gguf_writer.add_bool("falcon-mamba2.ssm.has_mup", True)
             if isinstance(self.ssm_multipliers, (list, tuple)):
                 for i, mult in enumerate(self.ssm_multipliers):
                     self.gguf_writer.add_float32(f"falcon-mamba2.ssm_multipliers.{i}", float(mult))
