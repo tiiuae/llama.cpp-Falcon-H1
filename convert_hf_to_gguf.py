@@ -3694,36 +3694,38 @@ class FalconMamba2Model(Mamba2Model):
         keys = list(keys) + prefixed
         return super().find_hparam(keys, *args, **kwargs)
 
-    def init_mup_vector(self):
+    def _generate_mup_vector(self, block_id: int) -> torch.Tensor:
         zxbcdt_multipliers = self.hparams["ssm_multipliers"]
         intermediate_size = self.hparams["mamba_d_ssm"]
         groups_time_state_size = self.hparams["mamba_n_groups"] * self.hparams["mamba_d_state"]
-        vector_shape = (
-                2 * intermediate_size + 2 * groups_time_state_size + self.hparams["mamba_n_heads"]
-            )
+        vector_shape = (2 * intermediate_size + 2 * groups_time_state_size + self.hparams["mamba_n_heads"])
+        
         mup_vector = torch.ones(1, 1, vector_shape)
         mup_vector[:, :, :intermediate_size] *= zxbcdt_multipliers[0]
         mup_vector[:, :, intermediate_size:2 * intermediate_size] *= zxbcdt_multipliers[1]
         mup_vector[:, :, 2 * intermediate_size:2 * intermediate_size + groups_time_state_size] *= zxbcdt_multipliers[2]
         mup_vector[:, :, 2 * intermediate_size + groups_time_state_size:2 * intermediate_size + 2 * groups_time_state_size] *= zxbcdt_multipliers[3]
         mup_vector[:, :, 2 * intermediate_size + 2 * groups_time_state_size:] *= zxbcdt_multipliers[4]
+        
         return mup_vector
 
-    def generate_extra_tensors(self) -> Iterable[tuple[str, Tensor]]:
-        yield from super().generate_extra_tensors()
-        
-        # Generate MUP vector for each layer
-        for i in range(self.block_count):
-            mup_vector = self.init_mup_vector()
-            yield (f"model.layers.{i}.mamba.mup_vector", mup_vector)
-
-    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
-        if name.endswith(".mamba.mup_vector"):
-            # Extract block id from the name
-            block_id = int(name.split(".")[2])
-            new_name = f"blk.{block_id}.ssm_mup_vec"
-            return [(new_name, data_torch)]
-        return super().modify_tensors(data_torch, name, bid)
+    def get_tensors(self) -> Iterator[tuple[str, Tensor]]:
+        for name, tensor in super().get_tensors():
+            if name.startswith("model.backbone") or name.startswith("model.lm_head"):
+                name = name.removeprefix("model.")
+            yield name, tensor
+            
+            if self.ssm_multipliers is not None:
+                # Insert MUP vector after mamba.dt_bias
+                if "mamba.dt_bias" in name:
+                    block_match = re.search(r"(?:model\.layers\.)?(\d+)\.mamba\.dt_bias", name)
+                    if block_match:
+                        block_id = int(block_match.group(1))
+                        # Generate MUP vector with correct name format
+                        mup_tensor = self._generate_mup_vector(block_id)
+                        mup_name = f"blk.{block_id}.ssm_mup_vec"
+                        logger.debug(f"Inserting MUP vector for block {block_id}: {mup_name}")
+                        yield mup_name, mup_tensor
 
     def set_gguf_parameters(self):
         super().set_gguf_parameters()
@@ -3776,14 +3778,9 @@ class FalconMamba2Model(Mamba2Model):
             self.gguf_writer.add_float32("falcon-mamba2.mlp_gate_multiplier", self.mlp_multipliers[0])
             self.gguf_writer.add_float32("falcon-mamba2.mlp_down_multiplier", self.mlp_multipliers[1])
         
-        # Add SSM multipliers if present
+        # Add has MuP flag if SSM multipliers are present
         if self.ssm_multipliers is not None:
             self.gguf_writer.add_bool("falcon-mamba2.ssm.has_mup", True)
-            if isinstance(self.ssm_multipliers, (list, tuple)):
-                for i, mult in enumerate(self.ssm_multipliers):
-                    self.gguf_writer.add_float32(f"falcon-mamba2.ssm_multipliers.{i}", float(mult))
-            else:
-                self.gguf_writer.add_float32("falcon-mamba2.ssm_multipliers", float(self.ssm_multipliers))
         
         # Add any other Falcon Mamba2 specific configuration
         falcon_specific_params = [
