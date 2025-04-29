@@ -3747,12 +3747,13 @@ class FalconMamba2Model(Mamba2Model):
 
         ## Attention params ##
         self.gguf_writer.add_head_count(self.hparams["num_attention_heads"])
-        self.gguf_writer.add_head_count_kv(self.find_hparam(["num_key_value_heads", "n_head_kv"]))
-
-        ## Feed Forward Params ##
-        self.gguf_writer.add_layer_norm_rms_eps(
-            self.find_hparam(["layer_norm_epsilon", "rms_norm_eps"], optional=True) or 1e-5
-        )
+        self.gguf_writer.add_head_count_kv(self.hparams["num_key_value_heads"] if "num_key_value_heads" in self.hparams else self.hparams["num_attention_heads"])
+        self.gguf_writer.add_layer_norm_rms_eps(self.hparams["rms_norm_eps"])
+        self.gguf_writer.add_key_length(self.hparams["head_dim"])
+        self.gguf_writer.add_value_length(self.hparams["head_dim"])
+        
+        self.gguf_writer.add_float32("falcon-mamba2.key_multiplier", self.hparams["key_multiplier"])
+        self.gguf_writer.add_float32("falcon-mamba2.lm_head_multiplier", self.hparams["lm_head_multiplier"])
         
         ## Validation ##
         assert self.hparams.get("hidden_act") in [None, "silu"], "Only SILU activation supported"
