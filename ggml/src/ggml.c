@@ -4479,7 +4479,6 @@ struct ggml_tensor * ggml_ssm_scan(
         struct ggml_tensor  * C,
         struct ggml_tensor  * ids) {
     GGML_ASSERT(ggml_is_contiguous(s));
-    GGML_ASSERT(ggml_is_contiguous(x));
     GGML_ASSERT(ggml_is_contiguous(dt));
     GGML_ASSERT(ggml_is_contiguous(A));
     GGML_ASSERT(x->nb[0] == ggml_type_size(x->type));

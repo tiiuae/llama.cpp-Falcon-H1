@@ -27,6 +27,10 @@ struct llama_context {
     struct llama_kv_cache     kv_self;
     struct llama_adapter_cvec cvec;
 
+    // Hybrid attention/ssm models use kv cache differently for attention/ssm
+    // layers with different kv_size values
+    struct llama_kv_cache kv_hybrid;
+
     std::unordered_map<struct llama_adapter_lora *, float> lora;
 
     std::vector<ggml_backend_ptr> backends;

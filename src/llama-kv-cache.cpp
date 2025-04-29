@@ -23,16 +23,17 @@ bool llama_kv_cache_init(
                          ggml_type   type_k,
                          ggml_type   type_v,
                           uint32_t   kv_size,
-                              bool   offload) {
+                              bool   offload,
+                              bool   hybrid) {
     const struct llama_hparams & hparams = model.hparams;
 
     const int32_t n_layer = hparams.n_layer;
 
     cache.has_shift = false;
 
-    cache.recurrent = llama_model_is_recurrent(&model);
+    cache.hybrid = hybrid;
     cache.v_trans   = !cache.recurrent && !cparams.flash_attn;
-    cache.can_shift = !cache.recurrent && model.arch != LLM_ARCH_DEEPSEEK2; // not supported due to MLA
+    cache.can_shift = !cache.recurrent && model.arch != LLM_ARCH_DEEPSEEK2 && model.arch != LLM_ARCH_FALCON_MAMBA2; // not supported due to MLA or hybrid architecture
 
     LLAMA_LOG_INFO("%s: kv_size = %d, offload = %d, type_k = '%s', type_v = '%s', n_layer = %d, can_shift = %d\n",
             __func__, kv_size, offload, ggml_type_name(type_k), ggml_type_name(type_v), n_layer, cache.can_shift);
@@ -52,13 +53,22 @@ bool llama_kv_cache_init(
     auto ctx_for_buft = [&](ggml_backend_buffer_type_t buft) -> ggml_context * {
         auto it = ctx_map.find(buft);
         if (it == ctx_map.end()) {
+            // Calculate memory size based on whether we need SSM states
+            size_t mem_size = cache.hybrid ?
+                size_t(8u*n_layer*ggml_tensor_overhead()) : // More memory for hybrid models with SSM states
+                size_t(2u*n_layer*ggml_tensor_overhead()); // Original size for non-recurrent models
+
             struct ggml_init_params params = {
-                /*.mem_size   =*/ size_t(2u*n_layer*ggml_tensor_overhead()),
+                /*.mem_size   =*/ mem_size,
                 /*.mem_buffer =*/ NULL,
                 /*.no_alloc   =*/ true,
             };
+            LLAMA_LOG_INFO("%s: allocating context with mem_size = %zu bytes for %s model\n",
+                __func__, mem_size, cache.hybrid ? "hybrid" : "non-hybrid");
+
             ggml_context * ctx = ggml_init(params);
             if (!ctx) {
+                LLAMA_LOG_ERROR("%s: failed to allocate context with mem_size = %zu bytes\n", __func__, mem_size);
                 return nullptr;
             }
             ctx_map[buft] = ctx;
@@ -71,12 +81,13 @@ bool llama_kv_cache_init(
     cache.k_l.reserve(n_layer);
     cache.v_l.reserve(n_layer);
 
+    // For recurrent models, we need to allocate tensors for SSM states
+    if (cache.hybrid) {
+        cache.conv_l.reserve(n_layer);
+        cache.ssm_l.reserve(n_layer);
+    }
+
     for (int i = 0; i < n_layer; i++) {
-        const uint32_t n_embd_k_gqa = hparams.n_embd_k_gqa(i) + hparams.n_embd_k_s();
-        const uint32_t n_embd_v_gqa = hparams.n_embd_v_gqa(i) + hparams.n_embd_v_s();
-
-        LLAMA_LOG_DEBUG("%s: layer %d: n_embd_k_gqa = %d, n_embd_v_gqa = %d\n", __func__, i, n_embd_k_gqa, n_embd_v_gqa);
-
         ggml_backend_buffer_type_t buft;
         if (offload) {
             auto * dev = model.dev_layer(i);
@@ -91,12 +102,36 @@ bool llama_kv_cache_init(
             return false;
         }
 
+
+        // Always use separate tensors for KV cache and SSM states
+        const uint32_t n_embd_k_gqa = hparams.n_embd_k_gqa(i); // key size
+        const uint32_t n_embd_v_gqa = hparams.n_embd_v_gqa(i); // value size
+
+        LLAMA_LOG_DEBUG("%s: layer %d: n_embd_k_gqa = %d, n_embd_v_gqa = %d\n", __func__, i, n_embd_k_gqa, n_embd_v_gqa);
+        // Allocate KV cache tensors
         ggml_tensor * k = ggml_new_tensor_1d(ctx, type_k, n_embd_k_gqa*kv_size);
         ggml_tensor * v = ggml_new_tensor_1d(ctx, type_v, n_embd_v_gqa*kv_size);
         ggml_format_name(k, "cache_k_l%d", i);
         ggml_format_name(v, "cache_v_l%d", i);
         cache.k_l.push_back(k);
         cache.v_l.push_back(v);
+
+        if (cache.hybrid) {
+            // Handle SSM state cache
+            // We need to allocate the convolution and SSM state tensors for recurrent models
+            const uint32_t conv_state_size = hparams.n_embd_k_s(i);
+            const uint32_t ssm_state_size = hparams.n_embd_v_s(i);
+
+            // Allocate convolution state tensor - fixed size regardless of sequence length
+            ggml_tensor * conv = ggml_new_tensor_1d(ctx, type_k, conv_state_size);
+            ggml_format_name(conv, "cache_conv_l%d", i);
+            cache.conv_l.push_back(conv);
+
+            // Allocate SSM state tensor - fixed size regardless of sequence length
+            ggml_tensor * ssm = ggml_new_tensor_1d(ctx, type_v, ssm_state_size);
+            ggml_format_name(ssm, "cache_ssm_l%d", i);
+            cache.ssm_l.push_back(ssm);
+        }
     }
 
     // allocate tensors and initialize the buffers to avoid NaNs in the padding
@@ -274,6 +309,15 @@ struct llama_kv_cache_slot_info llama_kv_cache_find_slot(
                 const llama_seq_id seq_id = ubatch.seq_id[s][j];
                 cell.seq_id.insert(seq_id);
                 cache.cells[seq_id].tail = cell_id;
+            }
+        }
+
+        // Find first to-be-cleared cell
+        cache.rs_z = -1;
+        for (int i = min; i <= max; ++i) {
+            if (cache.cells[i].src == -1) {
+                cache.rs_z = i;
+                break;
             }
         }
 

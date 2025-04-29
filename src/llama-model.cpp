@@ -178,22 +178,28 @@ static bool weight_buft_supported(const llama_hparams & hparams, ggml_tensor * w
         case GGML_OP_SSM_CONV:
             {
                 // FIXME
-                ggml_tensor * conv_x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 12345, w->ne[1], 6789);
+                const int64_t n_seq_tokens = 512;
+                const int64_t n_seqs       = 3;
+                ggml_tensor * conv_x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, w->ne[0] - 1 + n_seq_tokens, w->ne[1], n_seqs);
                 op_tensor = ggml_ssm_conv(ctx, conv_x, w);
             } break;
         case GGML_OP_SSM_SCAN:
             {
                 // FIXME
-                const int64_t d_state      = w->ne[0];
-                const int64_t d_inner      = w->ne[1];
+                // w is ssm_a
+                const int64_t d_state      = w->ne[0] == 1 ? hparams.ssm_d_state : w->ne[0];
+                const int64_t n_head       = w->ne[1];
+                const int64_t head_dim     = hparams.ssm_d_inner / n_head;
+                const int64_t n_group      = hparams.ssm_n_group;
                 const int64_t n_seq_tokens = 512;
-                const int64_t n_seqs       = 1;
-                ggml_tensor * s  = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, d_state, d_inner, n_seqs);
-                ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, d_inner, n_seq_tokens, n_seqs);
-                ggml_tensor * dt = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, d_inner, n_seq_tokens, n_seqs);
-                ggml_tensor * B = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, d_state, n_seq_tokens, n_seqs);
-                ggml_tensor * C = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, d_state, n_seq_tokens, n_seqs);
-                op_tensor = ggml_ssm_scan(ctx, s, x, dt, w, B, C);
+                const int64_t n_seqs       = 3;
+                ggml_tensor * s  = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, d_state, head_dim, n_head, n_seqs);
+                ggml_tensor * x = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, head_dim, n_head, n_seq_tokens, n_seqs);
+                ggml_tensor * dt = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_head, n_seq_tokens, n_seqs);
+                ggml_tensor * B = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, d_state, n_group, n_seq_tokens, n_seqs);
+                ggml_tensor * C = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, d_state, n_group, n_seq_tokens, n_seqs);
+                ggml_tensor * ids = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_seqs);
+                op_tensor = ggml_ssm_scan(ctx, s, x, dt, w, B, C, ids);
             } break;
         case GGML_OP_RWKV_WKV6:
             {
@@ -435,6 +441,11 @@ void llama_model::load_hparams(llama_model_loader & ml) {
     std::fill(hparams.n_head_arr.begin(),    hparams.n_head_arr.end(),    0);
     std::fill(hparams.n_head_kv_arr.begin(), hparams.n_head_kv_arr.end(), 0);
     std::fill(hparams.n_ff_arr.begin(),      hparams.n_ff_arr.end(),      0);
+
+    std::fill(
+        hparams.recurrent_layer_arr.begin(),
+        hparams.recurrent_layer_arr.end(),
+        llama_model_is_recurrent(this));
 
     ml.get_key_or_arr(LLM_KV_FEED_FORWARD_LENGTH,  hparams.n_ff_arr,   hparams.n_layer, false);
     ml.get_key_or_arr(LLM_KV_ATTENTION_HEAD_COUNT, hparams.n_head_arr, hparams.n_layer, false);
@@ -799,7 +810,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 switch (hparams.n_layer) {
                     case 40: type = LLM_TYPE_13B; break;
                     default: type = LLM_TYPE_UNKNOWN;
-               }
+                }
             } break;
         case LLM_ARCH_GPT2:
             {
@@ -904,6 +915,76 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                             case 2560: type = LLM_TYPE_3B; break;
                             default: type = LLM_TYPE_UNKNOWN;
                         } break;
+                    default: type = LLM_TYPE_UNKNOWN;
+                }
+            } break;
+        case LLM_ARCH_MAMBA2:
+            {
+                ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
+                ml.get_key(LLM_KV_SSM_INNER_SIZE,     hparams.ssm_d_inner);
+                ml.get_key(LLM_KV_SSM_STATE_SIZE,     hparams.ssm_d_state);
+                ml.get_key(LLM_KV_SSM_TIME_STEP_RANK, hparams.ssm_dt_rank);
+                ml.get_key(LLM_KV_SSM_GROUP_COUNT,    hparams.ssm_n_group);
+                ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+
+                switch (hparams.n_layer) {
+                    case 24:
+                        switch (hparams.n_embd) {
+                            case 768: type = LLM_TYPE_SMALL; break;
+                            default: type = LLM_TYPE_UNKNOWN;
+                        } break;
+                    case 48:
+                        switch (hparams.n_embd) {
+                            case 1024: type = LLM_TYPE_MEDIUM; break;
+                            case 1536: type = LLM_TYPE_LARGE; break;
+                            case 2048: type = LLM_TYPE_XL; break;
+                            default: type = LLM_TYPE_UNKNOWN;
+                        } break;
+                    case 64:
+                        switch (hparams.n_embd) {
+                            case 2560: type = LLM_TYPE_3B; break;
+                            case 4096: type = LLM_TYPE_7B; break;
+                            default: type = LLM_TYPE_UNKNOWN;
+                        } break;
+                    default: type = LLM_TYPE_UNKNOWN;
+                }
+            } break;
+        case LLM_ARCH_FALCON_MAMBA2:
+            {
+                // SSM parameters
+                ml.get_key(LLM_KV_MAMBA_D_SSM,        hparams.ssm_mamba_d_ssm);
+                ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
+                ml.get_key(LLM_KV_SSM_INNER_SIZE,     hparams.ssm_d_inner);
+                ml.get_key(LLM_KV_SSM_STATE_SIZE,     hparams.ssm_d_state);
+                ml.get_key(LLM_KV_SSM_TIME_STEP_RANK, hparams.ssm_dt_rank);
+                ml.get_key(LLM_KV_SSM_GROUP_COUNT,    hparams.ssm_n_group);
+                ml.get_key(LLM_KV_SSM_HEAD_DIM,       hparams.ssm_head_dim);
+
+                // Falcon Mamba2 parameters
+                ml.get_key(LLM_KV_ATTN_HEAD_DIM,      hparams.attn_head_dim);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_USE_MLP, hparams.mamba_use_mlp);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_ATTENTION_IN_MULTIPLIER, hparams.attention_in_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_ATTENTION_OUT_MULTIPLIER, hparams.attention_out_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_SSM_IN_MULTIPLIER, hparams.ssm_in_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_SSM_OUT_MULTIPLIER, hparams.ssm_out_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_MLP_GATE_MULTIPLIER, hparams.mlp_gate_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_MLP_DOWN_MULTIPLIER, hparams.mlp_down_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_SSM_HAS_MUP, hparams.ssm_has_mup);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_NORM_BEFORE_GATE, hparams.mamba_norm_before_gate);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_RMS_NORM, hparams.mamba_rms_norm);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_ROPE_THETA, hparams.rope_theta);
+
+                switch (hparams.n_layer) {
+                    case 36:
+                        type = LLM_TYPE_0_5B; break;
+                    case 24:
+                        type = LLM_TYPE_1B; break;
+                    case 66:
+                        type = LLM_TYPE_1B; break;
+                    case 32:
+                        type = LLM_TYPE_3B; break;
+                    case 44:
+                        type = LLM_TYPE_7B; break;
                     default: type = LLM_TYPE_UNKNOWN;
                 }
             } break;
@@ -1149,7 +1230,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                             default: type = LLM_TYPE_UNKNOWN;
                         } break;
                     default: type = LLM_TYPE_UNKNOWN;
-               }
+                }
             } break;
         case LLM_ARCH_T5ENCODER:
             {
@@ -1502,6 +1583,12 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
         };
 
         layers.resize(n_layer);
+
+        // Log out tensor names for verbose debugging
+        LLAMA_LOG_DEBUG("%s: TENSORS\n", __func__);
+        for (const auto& entry : ml.weights_map) {
+            LLAMA_LOG_DEBUG("%s: %s\n", __func__, entry.first.c_str());
+        }
 
         // TODO: move to a separate function
         const auto tn = LLM_TN(arch);
@@ -2545,6 +2632,138 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
                         // out_proj
                         layer.ssm_out = create_tensor(tn(LLM_TENSOR_SSM_OUT, "weight", i), {d_inner, n_embd}, 0);
+                    }
+                } break;
+            case LLM_ARCH_MAMBA2:
+                {
+                    const int64_t d_conv  = hparams.ssm_d_conv;
+                    const int64_t d_inner = hparams.ssm_d_inner;
+                    const int64_t d_state = hparams.ssm_d_state;
+                    const int64_t n_head  = hparams.ssm_dt_rank;
+                    const int64_t n_group = hparams.ssm_n_group;
+                    const int64_t d_in_proj = 2*d_inner + 2*n_group*d_state + n_head;
+
+                    // only an expansion factor of 2 is supported for now
+                    GGML_ASSERT(2 * n_embd == d_inner);
+
+                    tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
+
+                    // output
+                    {
+                        output_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd}, 0);
+
+                        output = create_tensor(tn(LLM_TENSOR_OUTPUT, "weight"), {n_embd, n_vocab}, TENSOR_NOT_REQUIRED);
+                        // if output is NULL, init from the input tok embed, duplicated to allow offloading
+                        if (output == NULL) {
+                            output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, TENSOR_DUPLICATED);
+                        }
+                    }
+
+                    for (int i = 0; i < n_layer; ++i) {
+                        auto & layer = layers[i];
+
+                        // norm
+                        layer.attn_norm = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i), {n_embd}, 0);
+
+                        layer.ssm_in = create_tensor(tn(LLM_TENSOR_SSM_IN, "weight", i), {n_embd, d_in_proj}, 0);
+
+                        layer.ssm_conv1d = create_tensor(tn(LLM_TENSOR_SSM_CONV1D, "weight", i), {d_conv, d_inner + 2*n_group*d_state}, 0);
+                        layer.ssm_conv1d_b = create_tensor(tn(LLM_TENSOR_SSM_CONV1D, "bias", i), {d_inner + 2*n_group*d_state}, 0);
+
+                        layer.ssm_dt_b = create_tensor(tn(LLM_TENSOR_SSM_DT, "bias", i), {n_head}, 0);
+
+                        // no "weight" suffix for these
+                        layer.ssm_a = create_tensor(tn(LLM_TENSOR_SSM_A, i), {1, n_head}, 0);
+                        layer.ssm_d = create_tensor(tn(LLM_TENSOR_SSM_D, i), {1, n_head}, 0);
+
+                        layer.ssm_norm = create_tensor(tn(LLM_TENSOR_SSM_NORM, "weight", i), {d_inner / n_group, n_group}, 0);
+
+                        // out_proj
+                        layer.ssm_out = create_tensor(tn(LLM_TENSOR_SSM_OUT, "weight", i), {d_inner, n_embd}, 0);
+                    }
+                } break;
+            // case LLM_ARCH_BAMBA:
+            case LLM_ARCH_FALCON_MAMBA2:
+                {
+                    // mamba2 Mixer SSM params
+                    const int64_t hidden_size = hparams.n_embd; // hidden_size
+                    const int64_t ssm_intermediate_size   = hparams.ssm_mamba_d_ssm; // ssm_intermediate_size
+                    const int64_t ssm_conv_kernel_size     = hparams.ssm_d_conv; // ssm_conv_kernel_size
+                    const int64_t ssm_state_size    = hparams.ssm_d_state; // ssm_state_size
+                    const int64_t ssm_num_heads = hparams.ssm_dt_rank; // ssm_num_heads
+                    const int64_t ssm_n_groups    = hparams.ssm_n_group; // ssm_n_groups
+                    const int64_t ssm_conv_dim = ssm_intermediate_size + 2 * ssm_n_groups * ssm_state_size;
+                    const int64_t ssm_projection_size = ssm_intermediate_size + ssm_conv_dim + ssm_num_heads;
+
+                    // attn params
+                    const int64_t attn_num_attention_head = hparams.n_head(0); // rename to: attn_num_attention_head
+                    const int64_t attn_head_dim = hparams.attn_head_dim;
+                    const int64_t attn_num_key_value_head = hparams.n_head_kv(0);
+
+                    const int64_t n_embd_k_gqa_i = hparams.n_embd_k_gqa(0); // it's always the same
+                    const int64_t n_embd_v_gqa_i = hparams.n_embd_v_gqa(0); // it's always the same
+
+
+                    // ffn params
+                    const int64_t ffn_intermediate_size    = hparams.ssm_d_inner; // ffn_intermediate_size
+
+                    // embeddings
+                    tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {hidden_size, n_vocab}, 0);
+
+                    // output
+                    {
+                        output = create_tensor(tn(LLM_TENSOR_OUTPUT, "weight"), {hidden_size, n_vocab}, TENSOR_NOT_REQUIRED);
+                        final_norm = create_tensor(tn(LLM_TENSOR_FINAL_NORM, "weight"), {hidden_size}, 0);
+                    }
+
+                    for (int i = 0; i < n_layer; ++i) {
+                        auto & layer = layers[i];
+
+                        /*SSM LAYERS*/
+                        // ssm in
+                        layer.ssm_in = create_tensor(tn(LLM_TENSOR_SSM_IN, "weight", i), {hidden_size, ssm_projection_size}, 0);
+                        layer.ssm_in_b = create_tensor(tn(LLM_TENSOR_SSM_IN, "bias", i), {n_embd, ssm_projection_size}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                        // ssm 1d conv
+                        layer.ssm_conv1d = create_tensor(tn(LLM_TENSOR_SSM_CONV1D, "weight", i), {ssm_conv_kernel_size, ssm_conv_dim}, 0);
+                        layer.ssm_conv1d_b = create_tensor(tn(LLM_TENSOR_SSM_CONV1D, "bias", i), {ssm_conv_dim}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                        // ssm_dt
+                        layer.ssm_dt_b = create_tensor(tn(LLM_TENSOR_SSM_DT, "bias", i), {ssm_num_heads}, 0);
+                        // no "weight" suffix for these
+                        layer.ssm_a = create_tensor(tn(LLM_TENSOR_SSM_A, i), {1, ssm_num_heads}, 0);
+                        layer.ssm_d = create_tensor(tn(LLM_TENSOR_SSM_D, i), {1, ssm_num_heads}, 0);
+                        if (hparams.ssm_has_mup == true) {
+                            layer.ssm_mup_vec = create_tensor(tn(LLM_TENSOR_SSM_MUP_VEC, i), {2*ssm_intermediate_size + 2*ssm_n_groups*ssm_state_size + ssm_num_heads}, 0);
+                        }
+                        // ssm_norm
+                        if (hparams.mamba_rms_norm == true) {
+                            layer.ssm_norm = create_tensor(tn(LLM_TENSOR_SSM_NORM, "weight", i), {ssm_intermediate_size / ssm_n_groups, ssm_n_groups}, 0);
+                        }
+                        // out_proj
+                        layer.ssm_out = create_tensor(tn(LLM_TENSOR_SSM_OUT, "weight", i), {ssm_intermediate_size, hidden_size}, 0);
+
+                        /*ATTENTION LAYERS*/
+                        // attention layers (with optional bias)
+                        layer.wq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "weight", i), {hidden_size, attn_head_dim * attn_num_attention_head}, 0);
+                        layer.wk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "weight", i), {hidden_size, attn_num_key_value_head * attn_head_dim}, 0);
+                        layer.wv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "weight", i), {hidden_size, attn_num_key_value_head * attn_head_dim}, 0);
+                        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {attn_head_dim * attn_num_attention_head, hidden_size}, 0);
+                        layer.bq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "bias", i), {hidden_size},         llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.bk = create_tensor(tn(LLM_TENSOR_ATTN_K,   "bias", i), {attn_num_key_value_head * attn_head_dim}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.bv = create_tensor(tn(LLM_TENSOR_ATTN_V,   "bias", i), {attn_num_key_value_head * attn_head_dim}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.bo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "bias", i), {hidden_size},         llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.attn_norm = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i), {hidden_size}, 0);
+
+
+                        // feed forward (w/ optional biases)
+                        layer.ffn_norm = create_tensor(tn(LLM_TENSOR_FFN_NORM, i), {hidden_size}, 0); // TODO: FIX blk.11.ffn_norm in the GGUF add prefix weight
+                        layer.rope_freqs = create_tensor(tn(LLM_TENSOR_ROPE_FREQS, "weight", i), {n_rot/2}, llama_model_loader::TENSOR_NOT_REQUIRED | (i != 0 ? llama_model_loader::TENSOR_DUPLICATED : 0));
+                        layer.ffn_gate = create_tensor(tn(LLM_TENSOR_FFN_GATE, "weight", i), {hidden_size,   ffn_intermediate_size}, 0);
+                        layer.ffn_down = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {  ffn_intermediate_size, hidden_size}, 0);
+                        layer.ffn_up   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {hidden_size,   ffn_intermediate_size}, 0);
+                        
+                        layer.ffn_gate_b = create_tensor(tn(LLM_TENSOR_FFN_GATE, "bias", i), {ffn_intermediate_size}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.ffn_down_b = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "bias", i), {hidden_size}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.ffn_up_b   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "bias", i), {ffn_intermediate_size}, llama_model_loader::TENSOR_NOT_REQUIRED);
                     }
                 } break;
             case LLM_ARCH_XVERSE:
@@ -3630,39 +3849,41 @@ void llama_model::print_info() const {
     LLAMA_LOG_INFO("%s: vocab_only       = %d\n",     __func__, hparams.vocab_only);
 
     if (!hparams.vocab_only) {
-        LLAMA_LOG_INFO("%s: n_ctx_train      = %u\n",     __func__, hparams.n_ctx_train);
-        LLAMA_LOG_INFO("%s: n_embd           = %u\n",     __func__, hparams.n_embd);
-        LLAMA_LOG_INFO("%s: n_layer          = %u\n",     __func__, hparams.n_layer);
-        LLAMA_LOG_INFO("%s: n_head           = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_head(il);    }, hparams.n_layer).c_str());
-        LLAMA_LOG_INFO("%s: n_head_kv        = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_head_kv(il); }, hparams.n_layer).c_str());
-        LLAMA_LOG_INFO("%s: n_rot            = %u\n",     __func__, hparams.n_rot);
-        LLAMA_LOG_INFO("%s: n_swa            = %u\n",     __func__, hparams.n_swa);
-        LLAMA_LOG_INFO("%s: n_embd_head_k    = %u\n",     __func__, hparams.n_embd_head_k);
-        LLAMA_LOG_INFO("%s: n_embd_head_v    = %u\n",     __func__, hparams.n_embd_head_v);
-        LLAMA_LOG_INFO("%s: n_gqa            = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_gqa(il);        }, hparams.n_layer).c_str());
-        LLAMA_LOG_INFO("%s: n_embd_k_gqa     = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_embd_k_gqa(il); }, hparams.n_layer).c_str());
-        LLAMA_LOG_INFO("%s: n_embd_v_gqa     = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_embd_v_gqa(il); }, hparams.n_layer).c_str());
-        LLAMA_LOG_INFO("%s: f_norm_eps       = %.1e\n",   __func__, hparams.f_norm_eps);
-        LLAMA_LOG_INFO("%s: f_norm_rms_eps   = %.1e\n",   __func__, hparams.f_norm_rms_eps);
-        LLAMA_LOG_INFO("%s: f_clamp_kqv      = %.1e\n",   __func__, hparams.f_clamp_kqv);
-        LLAMA_LOG_INFO("%s: f_max_alibi_bias = %.1e\n",   __func__, hparams.f_max_alibi_bias);
-        LLAMA_LOG_INFO("%s: f_logit_scale    = %.1e\n",   __func__, hparams.f_logit_scale);
-        LLAMA_LOG_INFO("%s: n_ff             = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_ff(il); }, hparams.n_layer).c_str());
-        LLAMA_LOG_INFO("%s: n_expert         = %u\n",     __func__, hparams.n_expert);
-        LLAMA_LOG_INFO("%s: n_expert_used    = %u\n",     __func__, hparams.n_expert_used);
-        LLAMA_LOG_INFO("%s: causal attn      = %d\n",     __func__, hparams.causal_attn);
-        LLAMA_LOG_INFO("%s: pooling type     = %d\n",     __func__, hparams.pooling_type);
-        LLAMA_LOG_INFO("%s: rope type        = %d\n",     __func__, hparams.rope_type);
-        LLAMA_LOG_INFO("%s: rope scaling     = %s\n",     __func__, rope_scaling_type);
-        LLAMA_LOG_INFO("%s: freq_base_train  = %.1f\n",   __func__, hparams.rope_freq_base_train);
-        LLAMA_LOG_INFO("%s: freq_scale_train = %g\n",     __func__, hparams.rope_freq_scale_train);
-        LLAMA_LOG_INFO("%s: n_ctx_orig_yarn  = %u\n",     __func__, hparams.n_ctx_orig_yarn);
-        LLAMA_LOG_INFO("%s: rope_finetuned   = %s\n",     __func__, hparams.rope_finetuned ? "yes" : "unknown");
-        LLAMA_LOG_INFO("%s: ssm_d_conv       = %u\n",     __func__, hparams.ssm_d_conv);
-        LLAMA_LOG_INFO("%s: ssm_d_inner      = %u\n",     __func__, hparams.ssm_d_inner);
-        LLAMA_LOG_INFO("%s: ssm_d_state      = %u\n",     __func__, hparams.ssm_d_state);
-        LLAMA_LOG_INFO("%s: ssm_dt_rank      = %u\n",     __func__, hparams.ssm_dt_rank);
-        LLAMA_LOG_INFO("%s: ssm_dt_b_c_rms   = %d\n",     __func__, hparams.ssm_dt_b_c_rms);
+        LLAMA_LOG_INFO("%s: n_ctx_train         = %u\n",     __func__, hparams.n_ctx_train);
+        LLAMA_LOG_INFO("%s: n_embd              = %u\n",     __func__, hparams.n_embd);
+        LLAMA_LOG_INFO("%s: n_layer             = %u\n",     __func__, hparams.n_layer);
+        LLAMA_LOG_INFO("%s: n_head              = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_head(il);    }, hparams.n_layer).c_str());
+        LLAMA_LOG_INFO("%s: n_head_kv           = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_head_kv(il); }, hparams.n_layer).c_str());
+        LLAMA_LOG_INFO("%s: n_rot               = %u\n",     __func__, hparams.n_rot);
+        LLAMA_LOG_INFO("%s: n_swa               = %u\n",     __func__, hparams.n_swa);
+        LLAMA_LOG_INFO("%s: n_embd_head_k       = %u\n",     __func__, hparams.n_embd_head_k);
+        LLAMA_LOG_INFO("%s: n_embd_head_v       = %u\n",     __func__, hparams.n_embd_head_v);
+        LLAMA_LOG_INFO("%s: n_gqa               = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_gqa(il);        }, hparams.n_layer).c_str());
+        LLAMA_LOG_INFO("%s: n_embd_k_gqa        = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_embd_k_gqa(il); }, hparams.n_layer).c_str());
+        LLAMA_LOG_INFO("%s: n_embd_v_gqa        = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_embd_v_gqa(il); }, hparams.n_layer).c_str());
+        LLAMA_LOG_INFO("%s: f_norm_eps          = %.1e\n",   __func__, hparams.f_norm_eps);
+        LLAMA_LOG_INFO("%s: f_norm_rms_eps      = %.1e\n",   __func__, hparams.f_norm_rms_eps);
+        LLAMA_LOG_INFO("%s: f_clamp_kqv         = %.1e\n",   __func__, hparams.f_clamp_kqv);
+        LLAMA_LOG_INFO("%s: f_max_alibi_bias    = %.1e\n",   __func__, hparams.f_max_alibi_bias);
+        LLAMA_LOG_INFO("%s: f_logit_scale       = %.1e\n",   __func__, hparams.f_logit_scale);
+        LLAMA_LOG_INFO("%s: n_ff                = %s\n",     __func__, print_f([&](uint32_t il) { return hparams.n_ff(il); }, hparams.n_layer).c_str());
+        LLAMA_LOG_INFO("%s: n_expert            = %u\n",     __func__, hparams.n_expert);
+        LLAMA_LOG_INFO("%s: n_expert_used       = %u\n",     __func__, hparams.n_expert_used);
+        LLAMA_LOG_INFO("%s: causal attn         = %d\n",     __func__, hparams.causal_attn);
+        LLAMA_LOG_INFO("%s: pooling type        = %d\n",     __func__, hparams.pooling_type);
+        LLAMA_LOG_INFO("%s: rope type           = %d\n",     __func__, hparams.rope_type);
+        LLAMA_LOG_INFO("%s: rope scaling        = %s\n",     __func__, rope_scaling_type);
+        LLAMA_LOG_INFO("%s: freq_base_train     = %.1f\n",   __func__, hparams.rope_freq_base_train);
+        LLAMA_LOG_INFO("%s: freq_scale_train    = %g\n",     __func__, hparams.rope_freq_scale_train);
+        LLAMA_LOG_INFO("%s: n_ctx_orig_yarn     = %u\n",     __func__, hparams.n_ctx_orig_yarn);
+        LLAMA_LOG_INFO("%s: rope_finetuned      = %s\n",     __func__, hparams.rope_finetuned ? "yes" : "unknown");
+        LLAMA_LOG_INFO("%s: ssm_d_conv          = %u\n",     __func__, hparams.ssm_d_conv);
+        LLAMA_LOG_INFO("%s: ssm_d_inner         = %u\n",     __func__, hparams.ssm_d_inner);
+        LLAMA_LOG_INFO("%s: ssm_d_state         = %u\n",     __func__, hparams.ssm_d_state);
+        LLAMA_LOG_INFO("%s: ssm_dt_rank         = %u\n",     __func__, hparams.ssm_dt_rank);
+        LLAMA_LOG_INFO("%s: ssm_dt_b_c_rms      = %d\n",     __func__, hparams.ssm_dt_b_c_rms);
+        LLAMA_LOG_INFO("%s: ssm_n_group         = %u\n",     __func__, hparams.ssm_n_group);
+        LLAMA_LOG_INFO("%s: ssm_head_dim        = %d\n",     __func__, hparams.ssm_head_dim);
     }
 
     LLAMA_LOG_INFO("%s: model type       = %s\n",     __func__, type_name().c_str());
@@ -3678,6 +3899,20 @@ void llama_model::print_info() const {
 
     // general kv
     LLAMA_LOG_INFO("%s: general.name     = %s\n",    __func__, name.c_str());
+
+    if (arch == LLM_ARCH_FALCON_MAMBA2) {
+        LLAMA_LOG_INFO("%s: mlp_gate_multiplier = %f\n",     __func__, hparams.mlp_gate_multiplier);
+        LLAMA_LOG_INFO("%s: mlp_down_multiplier = %f\n",     __func__, hparams.mlp_down_multiplier);
+        LLAMA_LOG_INFO("%s: attention_in_multiplier  = %f\n",     __func__, hparams.attention_in_multiplier);
+        LLAMA_LOG_INFO("%s: attention_out_multiplier = %f\n",     __func__, hparams.attention_out_multiplier);
+        LLAMA_LOG_INFO("%s: ssm_in_multiplier   = %f\n",     __func__, hparams.ssm_in_multiplier);
+        LLAMA_LOG_INFO("%s: ssm_out_multiplier  = %f\n",     __func__, hparams.ssm_out_multiplier);
+        LLAMA_LOG_INFO("%s: ssm_has_mup         = %d\n",     __func__, hparams.ssm_has_mup);
+        LLAMA_LOG_INFO("%s: mamba_use_mlp       = %d\n",     __func__, hparams.mamba_use_mlp);
+        LLAMA_LOG_INFO("%s: mamba_norm_before_gate = %d\n",     __func__, hparams.mamba_norm_before_gate);
+        LLAMA_LOG_INFO("%s: mamba_rms_norm      = %d\n",     __func__, hparams.mamba_rms_norm);
+        LLAMA_LOG_INFO("%s: rope_theta          = %f\n",     __func__, hparams.rope_theta);
+        }
 
     if (arch == LLM_ARCH_DEEPSEEK) {
         LLAMA_LOG_INFO("%s: n_layer_dense_lead   = %d\n",     __func__, hparams.n_layer_dense_lead);
@@ -3871,6 +4106,7 @@ enum llama_rope_type llama_model_rope_type(const struct llama_model * model) {
         case LLM_ARCH_REFACT:
         case LLM_ARCH_BLOOM:
         case LLM_ARCH_MAMBA:
+        case LLM_ARCH_MAMBA2:
         case LLM_ARCH_JINA_BERT_V2:
         case LLM_ARCH_T5:
         case LLM_ARCH_T5ENCODER:
@@ -3889,6 +4125,7 @@ enum llama_rope_type llama_model_rope_type(const struct llama_model * model) {
         case LLM_ARCH_ORION:
         case LLM_ARCH_INTERNLM2:
         case LLM_ARCH_MINICPM:
+        case LLM_ARCH_FALCON_MAMBA2:
         case LLM_ARCH_XVERSE:
         case LLM_ARCH_COMMAND_R:
         case LLM_ARCH_COHERE2:
@@ -4028,8 +4265,19 @@ llama_token llama_model_decoder_start_token(const struct llama_model * model) {
 bool llama_model_is_recurrent(const struct llama_model * model) {
     switch (model->arch) {
         case LLM_ARCH_MAMBA:  return true;
+        case LLM_ARCH_MAMBA2: return true;
         case LLM_ARCH_RWKV6:  return true;
         case LLM_ARCH_RWKV6QWEN2: return true;
+        case LLM_ARCH_FALCON_MAMBA2: return true;
         default:              return false;
+    }
+}
+
+bool llama_model_is_hybrid(const struct llama_model * model) {
+    switch (model->arch) {
+        case LLM_ARCH_FALCON_MAMBA2:
+            return true;
+        default:
+            return false;
     }
 }

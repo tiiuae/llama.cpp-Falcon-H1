@@ -85,12 +85,31 @@ struct llama_hparams {
     std::array<int, 4> rope_sections;
 
     // for State Space Models
-    uint32_t ssm_d_conv  = 0;
-    uint32_t ssm_d_inner = 0;
-    uint32_t ssm_d_state = 0;
-    uint32_t ssm_dt_rank = 0;
+    uint32_t ssm_d_conv     = 0;
+    uint32_t ssm_d_inner    = 0;
+    uint32_t ssm_d_state    = 0;
+    uint32_t ssm_dt_rank    = 0;
+    uint32_t ssm_n_group    = 0;
+    bool     ssm_dt_b_c_rms = false;
+    uint32_t ssm_head_dim   = 0;
+    uint32_t ssm_mamba_d_ssm = 0;
 
-    bool ssm_dt_b_c_rms = false;
+    // Falcon Mamba2 specific parameters
+    uint32_t attn_head_dim            = 0;
+    bool     mamba_use_mlp            = false;
+    bool     mamba_norm_before_gate   = false;
+    bool     mamba_rms_norm           = false;
+    float    attention_in_multiplier  = 1.0f;
+    float    attention_out_multiplier = 1.0f;
+    float    ssm_in_multiplier        = 1.0f;
+    float    ssm_out_multiplier       = 1.0f;
+    float    mlp_gate_multiplier      = 1.0f;
+    float    mlp_down_multiplier      = 1.0f;
+    float    rope_theta               = 10000.0f;
+    bool     ssm_has_mup              = false;
+
+    // for hybrid state space models
+    std::array<bool, LLAMA_MAX_LAYERS> recurrent_layer_arr;
 
     float f_clamp_kqv      = 0.0f;
     float f_max_alibi_bias = 0.0f;
@@ -129,10 +148,13 @@ struct llama_hparams {
 
     // dimension of the rolling state embeddings
     // corresponds to Mamba's conv_states size or RWKV's token_shift states size
-    uint32_t n_embd_k_s() const;
+    uint32_t n_embd_k_s(uint32_t il = 0) const;
 
     // dimension of the recurrent state embeddings
-    uint32_t n_embd_v_s() const;
+    uint32_t n_embd_v_s(uint32_t il = 0) const;
+
+    // reccurent layer
+    bool recurrent_layer(uint32_t il = 0) const;
 };
 
 static_assert(std::is_trivially_copyable<llama_hparams>::value, "llama_hparams must be trivially copyable");

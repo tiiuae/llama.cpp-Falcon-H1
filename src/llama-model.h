@@ -150,6 +150,8 @@ struct llama_layer {
     struct ggml_tensor * ffn_sub_norm    = nullptr;
     struct ggml_tensor * attn_norm_cross = nullptr;
     struct ggml_tensor * attn_norm_enc   = nullptr;
+    struct ggml_tensor * ssm_norm        = nullptr;
+    struct ggml_tensor * final_norm      = nullptr;
 
     // attention
     struct ggml_tensor * wq        = nullptr;
@@ -228,6 +230,8 @@ struct llama_layer {
     struct ggml_tensor * ssm_conv1d = nullptr;
     struct ggml_tensor * ssm_a      = nullptr;
     struct ggml_tensor * ssm_d      = nullptr;
+    struct ggml_tensor * ssm_in_b   = nullptr;
+    struct ggml_tensor * ssm_mup_vec = nullptr;
 
     // mamba bias
     struct ggml_tensor * ssm_conv1d_b = nullptr;
@@ -306,6 +310,7 @@ struct llama_model {
     struct ggml_tensor * output          = nullptr;
     struct ggml_tensor * output_b        = nullptr;
     struct ggml_tensor * output_norm_enc = nullptr;
+    struct ggml_tensor * final_norm      = nullptr;
 
     // classifier
     struct ggml_tensor * cls       = nullptr;
@@ -317,6 +322,9 @@ struct llama_model {
     struct ggml_tensor * conv1d_b = nullptr;
 
     std::vector<llama_layer> layers;
+
+    // Add reccurent layer array
+    std::array<bool, LLAMA_MAX_LAYERS> recurrent_layer_arr;
 
     llama_model_params params;
 
