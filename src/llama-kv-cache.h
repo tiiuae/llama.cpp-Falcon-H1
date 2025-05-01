@@ -33,7 +33,6 @@ struct llama_kv_cache {
     bool has_shift = false;
     bool do_defrag = false;
     bool recurrent = false; // with recurrent state models, a cell can hold the state for more than one past token
-    bool hybrid    = false; // hybrid models use a separate cache for SSM states
     bool v_trans   = true;  // the value tensor is transposed
     bool can_shift = false;
 
@@ -55,10 +54,6 @@ struct llama_kv_cache {
 
     std::vector<struct ggml_tensor *> k_l; // per layer
     std::vector<struct ggml_tensor *> v_l;
-
-    // For Falcon Mamba2 SSM states
-    std::vector<struct ggml_tensor *> conv_l; // convolution states per layer
-    std::vector<struct ggml_tensor *> ssm_l;  // SSM states per layer
 
     std::vector<ggml_context_ptr> ctxs;
     std::vector<ggml_backend_buffer_ptr> bufs;
@@ -105,7 +100,7 @@ bool llama_kv_cache_init(
                     ggml_type   type_v,
                      uint32_t   kv_size,
                          bool   offload,
-                         bool   hybrid);
+                         bool   recurrent);
 
 // find an empty slot of size "n_tokens" in the cache
 // updates the cache head

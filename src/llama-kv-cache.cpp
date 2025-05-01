@@ -24,16 +24,16 @@ bool llama_kv_cache_init(
                          ggml_type   type_v,
                           uint32_t   kv_size,
                               bool   offload,
-                              bool   hybrid) {
+                              bool   recurrent) {
     const struct llama_hparams & hparams = model.hparams;
 
     const int32_t n_layer = hparams.n_layer;
 
     cache.has_shift = false;
 
-    cache.hybrid = hybrid;
+    cache.recurrent = recurrent;
     cache.v_trans   = !cache.recurrent && !cparams.flash_attn;
-    cache.can_shift = !cache.recurrent && model.arch != LLM_ARCH_DEEPSEEK2 && model.arch != LLM_ARCH_FALCON_MAMBA2; // not supported due to MLA or hybrid architecture
+    cache.can_shift = model.arch != LLM_ARCH_DEEPSEEK2; // not supported due to MLA
 
     LLAMA_LOG_INFO("%s: kv_size = %d, offload = %d, type_k = '%s', type_v = '%s', n_layer = %d, can_shift = %d\n",
             __func__, kv_size, offload, ggml_type_name(type_k), ggml_type_name(type_v), n_layer, cache.can_shift);
@@ -53,22 +53,13 @@ bool llama_kv_cache_init(
     auto ctx_for_buft = [&](ggml_backend_buffer_type_t buft) -> ggml_context * {
         auto it = ctx_map.find(buft);
         if (it == ctx_map.end()) {
-            // Calculate memory size based on whether we need SSM states
-            size_t mem_size = cache.hybrid ?
-                size_t(8u*n_layer*ggml_tensor_overhead()) : // More memory for hybrid models with SSM states
-                size_t(2u*n_layer*ggml_tensor_overhead()); // Original size for non-recurrent models
-
             struct ggml_init_params params = {
-                /*.mem_size   =*/ mem_size,
+                /*.mem_size   =*/ size_t(2u*n_layer*ggml_tensor_overhead()),
                 /*.mem_buffer =*/ NULL,
                 /*.no_alloc   =*/ true,
             };
-            LLAMA_LOG_INFO("%s: allocating context with mem_size = %zu bytes for %s model\n",
-                __func__, mem_size, cache.hybrid ? "hybrid" : "non-hybrid");
-
             ggml_context * ctx = ggml_init(params);
             if (!ctx) {
-                LLAMA_LOG_ERROR("%s: failed to allocate context with mem_size = %zu bytes\n", __func__, mem_size);
                 return nullptr;
             }
             ctx_map[buft] = ctx;
@@ -81,13 +72,30 @@ bool llama_kv_cache_init(
     cache.k_l.reserve(n_layer);
     cache.v_l.reserve(n_layer);
 
-    // For recurrent models, we need to allocate tensors for SSM states
-    if (cache.hybrid) {
-        cache.conv_l.reserve(n_layer);
-        cache.ssm_l.reserve(n_layer);
-    }
-
     for (int i = 0; i < n_layer; i++) {
+        uint32_t n_embd_k_gqa;
+        uint32_t n_embd_v_gqa;
+
+        // For FalconMamba2 we have all layers reccurent, so for the kv_self
+        // we will use cache.recurrent to init cache=false for attention layers
+        // and cache.recurrent=true for recurrent layers
+        if (model.arch == LLM_ARCH_FALCON_MAMBA2 && !cache.recurrent) {
+            n_embd_k_gqa = hparams.n_embd_k_gqa(i);
+            n_embd_v_gqa = hparams.n_embd_v_gqa(i);
+        }
+        else if (model.arch == LLM_ARCH_FALCON_MAMBA2 && cache.recurrent)
+        {
+            n_embd_k_gqa = hparams.n_embd_k_s(i);
+            n_embd_v_gqa = hparams.n_embd_v_s(i);
+        }
+        else
+        {
+            n_embd_k_gqa = hparams.n_embd_k_gqa(i) + hparams.n_embd_k_s(i);
+            n_embd_v_gqa = hparams.n_embd_v_gqa(i) + hparams.n_embd_v_s(i);
+        }
+
+        LLAMA_LOG_DEBUG("%s: layer %d: n_embd_k_gqa = %d, n_embd_v_gqa = %d\n", __func__, i, n_embd_k_gqa, n_embd_v_gqa);
+
         ggml_backend_buffer_type_t buft;
         if (offload) {
             auto * dev = model.dev_layer(i);
@@ -102,36 +110,23 @@ bool llama_kv_cache_init(
             return false;
         }
 
+        // If this is a hybrid model, there will be two caches, one for
+        // recurrent layers and one for attention layers. The tensors in the
+        // cache only need to be fully allocated for the correct layers.
+        // For FalconMamba2, we need to use model arch because reccurent
+        // layers are all true
+        const uint32_t tensor_dim = (
+            (cache.recurrent && hparams.recurrent_layer(i))   ||
+            (!cache.recurrent && !hparams.recurrent_layer(i)) ||
+            (model.arch == LLM_ARCH_FALCON_MAMBA2)
+            ? kv_size : 0);
 
-        // Always use separate tensors for KV cache and SSM states
-        const uint32_t n_embd_k_gqa = hparams.n_embd_k_gqa(i); // key size
-        const uint32_t n_embd_v_gqa = hparams.n_embd_v_gqa(i); // value size
-
-        LLAMA_LOG_DEBUG("%s: layer %d: n_embd_k_gqa = %d, n_embd_v_gqa = %d\n", __func__, i, n_embd_k_gqa, n_embd_v_gqa);
-        // Allocate KV cache tensors
-        ggml_tensor * k = ggml_new_tensor_1d(ctx, type_k, n_embd_k_gqa*kv_size);
-        ggml_tensor * v = ggml_new_tensor_1d(ctx, type_v, n_embd_v_gqa*kv_size);
+        ggml_tensor * k = ggml_new_tensor_1d(ctx, type_k, n_embd_k_gqa*tensor_dim);
+        ggml_tensor * v = ggml_new_tensor_1d(ctx, type_v, n_embd_v_gqa*tensor_dim);
         ggml_format_name(k, "cache_k_l%d", i);
         ggml_format_name(v, "cache_v_l%d", i);
         cache.k_l.push_back(k);
         cache.v_l.push_back(v);
-
-        if (cache.hybrid) {
-            // Handle SSM state cache
-            // We need to allocate the convolution and SSM state tensors for recurrent models
-            const uint32_t conv_state_size = hparams.n_embd_k_s(i);
-            const uint32_t ssm_state_size = hparams.n_embd_v_s(i);
-
-            // Allocate convolution state tensor - fixed size regardless of sequence length
-            ggml_tensor * conv = ggml_new_tensor_1d(ctx, type_k, conv_state_size);
-            ggml_format_name(conv, "cache_conv_l%d", i);
-            cache.conv_l.push_back(conv);
-
-            // Allocate SSM state tensor - fixed size regardless of sequence length
-            ggml_tensor * ssm = ggml_new_tensor_1d(ctx, type_v, ssm_state_size);
-            ggml_format_name(ssm, "cache_ssm_l%d", i);
-            cache.ssm_l.push_back(ssm);
-        }
     }
 
     // allocate tensors and initialize the buffers to avoid NaNs in the padding

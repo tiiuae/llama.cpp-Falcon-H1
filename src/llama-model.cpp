@@ -973,6 +973,8 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_NORM_BEFORE_GATE, hparams.mamba_norm_before_gate);
                 ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_RMS_NORM, hparams.mamba_rms_norm);
                 ml.get_key(LLM_KV_FALCON_MAMBA2_ROPE_THETA, hparams.rope_theta);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_KEY_MULTIPLIER, hparams.key_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_LM_HEAD_MULTIPLIER, hparams.lm_head_multiplier);
 
                 switch (hparams.n_layer) {
                     case 36:
@@ -3912,7 +3914,9 @@ void llama_model::print_info() const {
         LLAMA_LOG_INFO("%s: mamba_norm_before_gate = %d\n",     __func__, hparams.mamba_norm_before_gate);
         LLAMA_LOG_INFO("%s: mamba_rms_norm      = %d\n",     __func__, hparams.mamba_rms_norm);
         LLAMA_LOG_INFO("%s: rope_theta          = %f\n",     __func__, hparams.rope_theta);
-        }
+        LLAMA_LOG_INFO("%s: key_multiplier      = %f\n",     __func__, hparams.key_multiplier);
+        LLAMA_LOG_INFO("%s: lm_head_multiplier  = %f\n",     __func__, hparams.lm_head_multiplier);
+    }
 
     if (arch == LLM_ARCH_DEEPSEEK) {
         LLAMA_LOG_INFO("%s: n_layer_dense_lead   = %d\n",     __func__, hparams.n_layer_dense_lead);

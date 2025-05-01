@@ -105,6 +105,8 @@ struct llama_hparams {
     float    ssm_out_multiplier       = 1.0f;
     float    mlp_gate_multiplier      = 1.0f;
     float    mlp_down_multiplier      = 1.0f;
+    float    key_multiplier           = 1.0f;
+    float    lm_head_multiplier       = 1.0f;
     float    rope_theta               = 10000.0f;
     bool     ssm_has_mup              = false;
 

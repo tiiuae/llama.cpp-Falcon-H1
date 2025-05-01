@@ -938,8 +938,8 @@ static struct ggml_tensor * llm_build_mamba2(
     GGML_ASSERT(batch.equal_seqs);
     GGML_ASSERT(batch.n_tokens == n_seq_tokens * n_seqs);
 
-    struct ggml_tensor * conv_states_all = kv.conv_l[il];
-    struct ggml_tensor * ssm_states_all  = kv.ssm_l[il];
+    struct ggml_tensor * conv_states_all = kv.k_l[il];
+    struct ggml_tensor * ssm_states_all  = kv.v_l[il];
 
     const uint32_t conv_state_size = hparams.n_embd_k_s(il);
     const uint32_t ssm_state_size = hparams.n_embd_v_s(il);
@@ -5419,6 +5419,7 @@ struct llm_build_context {
 
         // {n_embd, n_tokens}
         inpL = llm_build_inp_embd(ctx0, lctx, hparams, ubatch, model.tok_embd, cb);
+        cb(inpL, "inp_embd", -1);
 
         struct ggml_tensor * state_copy = build_inp_s_copy(/* hybrid */true);
 
@@ -5463,8 +5464,6 @@ struct llm_build_context {
                     LLM_NORM_RMS, cb, il);
             cb(cur, "attn_norm", il);
 
-
-
             // compute Q and K and RoPE them
             struct ggml_tensor * Qcur = llm_build_lora_mm(lctx, ctx0, model.layers[il].wq, cur);
             cb(Qcur, "Qcur", il);
@@ -5473,13 +5472,16 @@ struct llm_build_context {
                 cb(Qcur, "Qcur", il);
             }
 
-            // TODO: MULTIPLY BY KEY MULTIPLIER
             struct ggml_tensor * Kcur = llm_build_lora_mm(lctx, ctx0, model.layers[il].wk, cur);
             cb(Kcur, "Kcur", il);
             if (model.layers[il].bk) {
                 Kcur = ggml_add(ctx0, Kcur, model.layers[il].bk);
                 cb(Kcur, "Kcur", il);
             }
+
+            // scale the key value by the key value multiplier
+            Kcur = ggml_scale(ctx0, Kcur, hparams.key_multiplier);
+            cb(Kcur, "Kcur x key_multiplier", il);
 
             struct ggml_tensor * Vcur = llm_build_lora_mm(lctx, ctx0, model.layers[il].wv, cur);
             cb(Vcur, "Vcur", il);
@@ -5555,12 +5557,15 @@ struct llm_build_context {
 
         // final rmsnorm
         cur = llm_build_norm(ctx0, inpL, hparams,
-                model.output_norm, NULL,
+                model.final_norm, NULL,
                 LLM_NORM_RMS, cb, -1);
         cb(cur, "result_norm", -1);
 
         // lm_head
         cur = llm_build_lora_mm(lctx, ctx0, model.output, cur);
+        cb(cur, "post_lm_head_multiplier", -1);
+
+        cur = ggml_scale(ctx0, cur, hparams.lm_head_multiplier);
         cb(cur, "result_output", -1);
 
         ggml_build_forward_expand(gf, cur);
@@ -8909,7 +8914,7 @@ static int llama_prepare_sbatch(
     }
 
     lctx.sbatch.from_batch(batch, n_embd,
-        /* simple_split */ !lctx.kv_self.recurrent,
+        /* simple_split */ !(lctx.kv_self.recurrent || (llama_model_is_hybrid(&model) && lctx.kv_hybrid.recurrent)),
         /* logits_all   */ n_outputs == n_tokens_all);
 
     // reserve output buffer
@@ -10213,7 +10218,7 @@ struct llama_context * llama_init_from_model(
         llama_set_abort_callback(ctx, params.abort_callback, params.abort_callback_data);
 
         // the self cache is recurrent IFF the model is recurrent, but not hybrid
-        if (!llama_kv_cache_init(ctx->kv_self, *model, cparams, type_k, type_v, kv_size, cparams.offload_kqv, false)) {
+        if (!llama_kv_cache_init(ctx->kv_self, ctx->model, ctx->cparams, type_k, type_v, kv_size, cparams.offload_kqv, recurrent && !hybrid)) {
             LLAMA_LOG_ERROR("%s: llama_kv_cache_init() failed for self-attention cache\n", __func__);
             llama_free(ctx);
             return nullptr;
@@ -10223,15 +10228,12 @@ struct llama_context * llama_init_from_model(
             // Log cache memory usage
             size_t memory_size_k = 0;
             size_t memory_size_v = 0;
-
             for (auto & k : ctx->kv_self.k_l) {
                 memory_size_k += ggml_nbytes(k);
             }
-
             for (auto & v : ctx->kv_self.v_l) {
                 memory_size_v += ggml_nbytes(v);
             }
-
             LLAMA_LOG_INFO("%s: KV self size  = %7.2f MiB, K (%s): %7.2f MiB, V (%s): %7.2f MiB\n", __func__,
                       (float)(memory_size_k + memory_size_v) / (1024.0f * 1024.0f),
                 ggml_type_name(type_k), (float)memory_size_k / (1024.0f * 1024.0f),
@@ -10239,8 +10241,8 @@ struct llama_context * llama_init_from_model(
         }
 
         // For hybrid models, initialize the hybrid kv cache
-        if (kv_size_hybrid > 0 && !llama_kv_cache_init(ctx->kv_hybrid, *model, cparams, type_k, type_v, kv_size_hybrid, cparams.offload_kqv, true)) {
-            LLAMA_LOG_ERROR("%s: llama_kv_cache_init() failed for self-attention cache\n", __func__);
+        if (kv_size_hybrid > 0 && !llama_kv_cache_init(ctx->kv_hybrid, ctx->model, ctx->cparams, type_k, type_v, kv_size_hybrid, cparams.offload_kqv, true)) {
+            LLAMA_LOG_ERROR("%s: llama_kv_cache_init() failed for hybrid self-attention cache\n", __func__);
             llama_free(ctx);
             return nullptr;
         }
