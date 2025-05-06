@@ -325,7 +325,6 @@ class MODEL_TENSOR(IntEnum):
     ATTN_Q_NORM          = auto()
     ATTN_K_NORM          = auto()
     LAYER_OUT_NORM       = auto()
-    FINAL_NORM           = auto()
     SSM_MUP_VEC          = auto()
     SSM_IN               = auto()
     SSM_CONV1D           = auto()
@@ -502,7 +501,7 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.FFN_GATE_INP:              "blk.{bid}.ffn_gate_inp",
     MODEL_TENSOR.FFN_GATE_INP_SHEXP:        "blk.{bid}.ffn_gate_inp_shexp",
     MODEL_TENSOR.FFN_NORM:                  "blk.{bid}.ffn_norm",
-    MODEL_TENSOR.FFN_PRE_NORM:              "blk.{bid}.ffn_norm",
+    MODEL_TENSOR.FFN_PRE_NORM:              "blk.{bid}.ffn_pre_norm",
     MODEL_TENSOR.FFN_POST_NORM:             "blk.{bid}.post_ffw_norm",
     MODEL_TENSOR.FFN_GATE:                  "blk.{bid}.ffn_gate",
     MODEL_TENSOR.FFN_DOWN:                  "blk.{bid}.ffn_down",
@@ -517,7 +516,6 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.FFN_UP_EXP:                "blk.{bid}.ffn_up_exps",
     MODEL_TENSOR.FFN_EXP_PROBS_B:           "blk.{bid}.exp_probs_b",
     MODEL_TENSOR.LAYER_OUT_NORM:            "blk.{bid}.layer_output_norm",
-    MODEL_TENSOR.FINAL_NORM:                "blk.final_layer_norm",
     MODEL_TENSOR.SSM_IN:                    "blk.{bid}.ssm_in",
     MODEL_TENSOR.SSM_MUP_VEC:               "blk.{bid}.ssm_mup_vec",
     MODEL_TENSOR.SSM_CONV1D:                "blk.{bid}.ssm_conv1d",
@@ -1195,16 +1193,10 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         # Token embedding
         MODEL_TENSOR.TOKEN_EMBD,
         
-        # Pre-feedforward layernorm
-        MODEL_TENSOR.FFN_PRE_NORM,
+        # Input layernorm
+        MODEL_TENSOR.ATTN_NORM,
         
-        # Final layer norm and output
-        MODEL_TENSOR.OUTPUT_NORM,
-        MODEL_TENSOR.OUTPUT,
-        
-        # Per-layer tensors (these will be indexed by block ID)
         # Attention components
-        MODEL_TENSOR.ATTN_NORM,      # Input layernorm for attention
         MODEL_TENSOR.ATTN_Q,         # Query projection
         MODEL_TENSOR.ATTN_K,         # Key projection
         MODEL_TENSOR.ATTN_V,         # Value projection
@@ -1220,13 +1212,17 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.SSM_NORM,       # Normalization in SSM
         MODEL_TENSOR.SSM_OUT,        # Output projection
         
+        # Pre-feedforward layernorm
+        MODEL_TENSOR.FFN_PRE_NORM,
+        
         # Feed-forward network components
-        MODEL_TENSOR.FFN_NORM,       # Normalization before FFN
         MODEL_TENSOR.FFN_GATE,       # Gate projection (SwiGLU)
         MODEL_TENSOR.FFN_DOWN,       # Down projection
         MODEL_TENSOR.FFN_UP,         # Up projection
         
-        MODEL_TENSOR.FINAL_NORM,     # Final layernorm
+        # Post-feedforward layernorm
+        MODEL_TENSOR.OUTPUT_NORM,    # Final layer norm
+        MODEL_TENSOR.OUTPUT,         # Output projection (lm_head)
     ],
     MODEL_ARCH.XVERSE: [
         MODEL_TENSOR.TOKEN_EMBD,

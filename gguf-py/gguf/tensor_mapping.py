@@ -55,7 +55,7 @@ class TensorNameMap:
         # Output
         MODEL_TENSOR.OUTPUT: (
             "embed_out",                 # gptneox
-            "lm_head",                   # gpt2 mpt falcon llama-hf baichuan qwen mamba dbrx jais nemotron exaone olmoe olmo2 phimoe
+            "lm_head",                   # gpt2 mpt falcon llama-hf baichuan qwen mamba dbrx jais nemotron exaone olmoe olmo2 phimoe falcon-mamba2
             "output",                    # llama-pth bloom internlm2
             "word_embeddings_for_head",  # persimmon
             "lm_head.linear",            # phi2
@@ -73,7 +73,7 @@ class TensorNameMap:
             "transformer.norm_f",                      # mpt dbrx
             "ln_f",                                    # refact bloom qwen gpt2
             "language_model.encoder.final_layernorm",  # persimmon
-            "model.final_layernorm",                   # persimmon
+            "model.final_layernorm",                   # persimmon falcon-mamba2
             "lm_head.ln",                              # phi2
             "model.norm_f",                            # mamba-qbert
             "backbone.norm_f",                         # mamba
@@ -108,7 +108,7 @@ class TensorNameMap:
             "transformer.h.{bid}.input_layernorm",                  # falcon7b
             "h.{bid}.input_layernorm",                              # bloom
             "transformer.h.{bid}.ln_mlp",                           # falcon40b
-            "model.layers.{bid}.input_layernorm",                   # llama-hf nemotron olmoe phimoe
+            "model.layers.{bid}.input_layernorm",                   # llama-hf nemotron olmoe phimoe falcon-mamba2
             "layers.{bid}.attention_norm",                          # llama-pth
             "language_model.encoder.layers.{bid}.input_layernorm",  # persimmon
             "model.layers.{bid}.ln1",                               # yi
@@ -431,12 +431,12 @@ class TensorNameMap:
             "encoder.layer.{bid}.layer_norm_2"              # jina-v2-code
         ),
 
-        MODEL_TENSOR.FINAL_NORM: (
-            "model.final_layernorm",                 # falcon-mamba2
-        ),
-
         MODEL_TENSOR.SSM_MUP_VEC: (
             "model.layers.{bid}.mamba.mup_vector",            # falcon-mamba2
+        ),
+
+        MODEL_TENSOR.SSM_NORM: (
+            "model.layers.{bid}.mamba.norm",
         ),
 
         MODEL_TENSOR.SSM_IN: (

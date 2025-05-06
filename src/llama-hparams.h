@@ -109,6 +109,9 @@ struct llama_hparams {
     float    lm_head_multiplier       = 1.0f;
     float    rope_theta               = 10000.0f;
     bool     ssm_has_mup              = false;
+    float    embedding_multiplier     = 1.0f;
+    uint32_t vocab_size               = 0;
+    uint32_t intermediate_size        = 0;
 
     // for hybrid state space models
     std::array<bool, LLAMA_MAX_LAYERS> recurrent_layer_arr;

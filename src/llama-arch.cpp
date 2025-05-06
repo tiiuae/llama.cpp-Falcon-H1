@@ -166,6 +166,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_FALCON_MAMBA2_ROPE_THETA,               "%s.rope_theta"               },
     { LLM_KV_FALCON_MAMBA2_KEY_MULTIPLIER,           "%s.key_multiplier"           },
     { LLM_KV_FALCON_MAMBA2_LM_HEAD_MULTIPLIER,       "%s.lm_head_multiplier"       },
+    { LLM_KV_FALCON_MAMBA2_EMBEDDING_MULTIPLIER,     "%s.embedding_multiplier"     },
 
     { LLM_KV_WKV_HEAD_SIZE, "%s.wkv.head_size" },
 
@@ -840,8 +841,8 @@ static const std::map<llm_arch, std::map<llm_tensor, const char *>> LLM_TENSOR_N
         LLM_ARCH_FALCON_MAMBA2,
         {
             { LLM_TENSOR_TOKEN_EMBD,      "token_embd" },
-            { LLM_TENSOR_FFN_PRE_NORM,    "ffn_pre_norm" },
             { LLM_TENSOR_OUTPUT,          "output" },
+            { LLM_TENSOR_OUTPUT_NORM,     "output_norm" },
             { LLM_TENSOR_ATTN_NORM,       "blk.%d.attn_norm" },
             { LLM_TENSOR_ATTN_Q,          "blk.%d.attn_q" },
             { LLM_TENSOR_ATTN_K,          "blk.%d.attn_k" },
@@ -855,11 +856,10 @@ static const std::map<llm_arch, std::map<llm_tensor, const char *>> LLM_TENSOR_N
             { LLM_TENSOR_SSM_D,           "blk.%d.ssm_d" },
             { LLM_TENSOR_SSM_NORM,        "blk.%d.ssm_norm" },
             { LLM_TENSOR_SSM_OUT,         "blk.%d.ssm_out" },
-            { LLM_TENSOR_FFN_NORM,        "blk.%d.ffn_norm" },
+            { LLM_TENSOR_FFN_PRE_NORM,    "blk.%d.ffn_pre_norm" },
             { LLM_TENSOR_FFN_GATE,        "blk.%d.ffn_gate" },
             { LLM_TENSOR_FFN_DOWN,        "blk.%d.ffn_down" },
             { LLM_TENSOR_FFN_UP,          "blk.%d.ffn_up" },
-            { LLM_TENSOR_FINAL_NORM,      "blk.final_layer_norm" },
         },
     },
     {
@@ -1472,6 +1472,7 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
     {LLM_TENSOR_ATTN_OUT_NORM,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_ATTN_POST_NORM,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_FFN_NORM,                   {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+    {LLM_TENSOR_FFN_PRE_NORM,               {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_FFN_POST_NORM,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_FFN_NORM_EXPS,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_ATTN_Q_NORM,                {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},

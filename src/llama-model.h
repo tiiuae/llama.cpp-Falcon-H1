@@ -185,6 +185,7 @@ struct llama_layer {
     struct ggml_tensor * attn_rel_b_cross = nullptr;
 
     // normalization
+    struct ggml_tensor * ffn_pre_norm     = nullptr;
     struct ggml_tensor * ffn_norm         = nullptr;
     struct ggml_tensor * ffn_norm_b       = nullptr;
     struct ggml_tensor * ffn_post_norm    = nullptr;

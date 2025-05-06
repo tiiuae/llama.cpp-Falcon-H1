@@ -951,6 +951,9 @@ void llama_model::load_hparams(llama_model_loader & ml) {
             } break;
         case LLM_ARCH_FALCON_MAMBA2:
             {
+                // Load vocab size
+                ml.get_key(LLM_KV_VOCAB_SIZE,         hparams.vocab_size);
+
                 // SSM parameters
                 ml.get_key(LLM_KV_MAMBA_D_SSM,        hparams.ssm_mamba_d_ssm);
                 ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
@@ -975,12 +978,13 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_FALCON_MAMBA2_ROPE_THETA, hparams.rope_theta);
                 ml.get_key(LLM_KV_FALCON_MAMBA2_KEY_MULTIPLIER, hparams.key_multiplier);
                 ml.get_key(LLM_KV_FALCON_MAMBA2_LM_HEAD_MULTIPLIER, hparams.lm_head_multiplier);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_EMBEDDING_MULTIPLIER, hparams.embedding_multiplier);
 
                 switch (hparams.n_layer) {
                     case 36:
                         type = LLM_TYPE_0_5B; break;
                     case 24:
-                        type = LLM_TYPE_1B; break;
+                        type = LLM_TYPE_1_5B; break;
                     case 66:
                         type = LLM_TYPE_1B; break;
                     case 32:
@@ -2704,18 +2708,16 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
                     const int64_t n_embd_k_gqa_i = hparams.n_embd_k_gqa(0); // it's always the same
                     const int64_t n_embd_v_gqa_i = hparams.n_embd_v_gqa(0); // it's always the same
-
-
-                    // ffn params
-                    const int64_t ffn_intermediate_size    = hparams.ssm_d_inner; // ffn_intermediate_size
+                    const int64_t vocab_size = hparams.vocab_size;
+                    const int64_t ffn_intermediate_size = hparams.n_ff(0);
 
                     // embeddings
-                    tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {hidden_size, n_vocab}, 0);
+                    tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, vocab_size}, 0);
 
                     // output
                     {
-                        output = create_tensor(tn(LLM_TENSOR_OUTPUT, "weight"), {hidden_size, n_vocab}, TENSOR_NOT_REQUIRED);
-                        final_norm = create_tensor(tn(LLM_TENSOR_FINAL_NORM, "weight"), {hidden_size}, 0);
+                        output = create_tensor(tn(LLM_TENSOR_OUTPUT, "weight"), {hidden_size, vocab_size}, TENSOR_NOT_REQUIRED);
+                        final_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {hidden_size}, 0);
                     }
 
                     for (int i = 0; i < n_layer; ++i) {
@@ -2757,7 +2759,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
 
                         // feed forward (w/ optional biases)
-                        layer.ffn_norm = create_tensor(tn(LLM_TENSOR_FFN_NORM, i), {hidden_size}, 0); // TODO: FIX blk.11.ffn_norm in the GGUF add prefix weight
+                        layer.ffn_pre_norm = create_tensor(tn(LLM_TENSOR_FFN_PRE_NORM, i), {hidden_size}, 0);
                         layer.rope_freqs = create_tensor(tn(LLM_TENSOR_ROPE_FREQS, "weight", i), {n_rot/2}, llama_model_loader::TENSOR_NOT_REQUIRED | (i != 0 ? llama_model_loader::TENSOR_DUPLICATED : 0));
                         layer.ffn_gate = create_tensor(tn(LLM_TENSOR_FFN_GATE, "weight", i), {hidden_size,   ffn_intermediate_size}, 0);
                         layer.ffn_down = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {  ffn_intermediate_size, hidden_size}, 0);
@@ -3916,6 +3918,7 @@ void llama_model::print_info() const {
         LLAMA_LOG_INFO("%s: rope_theta          = %f\n",     __func__, hparams.rope_theta);
         LLAMA_LOG_INFO("%s: key_multiplier      = %f\n",     __func__, hparams.key_multiplier);
         LLAMA_LOG_INFO("%s: lm_head_multiplier  = %f\n",     __func__, hparams.lm_head_multiplier);
+        LLAMA_LOG_INFO("%s: embedding_multiplier = %f\n",     __func__, hparams.embedding_multiplier);
     }
 
     if (arch == LLM_ARCH_DEEPSEEK) {

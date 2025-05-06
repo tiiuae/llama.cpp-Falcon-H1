@@ -604,6 +604,9 @@ class Model:
         if chkhsh == "a6b57017d60e6edb4d88ecc2845188e0eb333a70357e45dcc9b53964a73bbae6":
             # ref: 
             res = "falcon-mamba2"
+        if chkhsh == "60476e1243776c4fb1b993dbd7a5f15ac22f83c80afdf425fa5ae01c8d44ef86":
+            # ref: 
+            res = "falcon-mamba2"
         if chkhsh == "8e62295832751ca1e8f92f2226f403dea30dc5165e448b5bfa05af5340c64ec7":
             # ref: https://huggingface.co/BAAI/bge-large-zh-v1.5
             res = "bert-bge-large"
@@ -3571,6 +3574,7 @@ class Mamba2Model(Model):
         self.d_model = self.find_hparam(["hidden_size", "d_model", "dim"])
         self.n_group = self.find_hparam(["n_groups"], optional=True) or 1
         self.d_inner = self.find_hparam(["intermediate_size", "d_inner"], optional=True) or 2 * self.d_model
+        self.mamba_d_ssm = self.find_hparam(["mamba_d_ssm"], optional=True) or self.d_inner
 
     def set_vocab(self):
         vocab_size = self.hparams["vocab_size"]
@@ -3636,7 +3640,7 @@ class Mamba2Model(Model):
             return data_torch.reshape((*data_torch.shape, 1))
 
         elif self.match_model_tensor_name(new_name, gguf.MODEL_TENSOR.SSM_NORM, bid):
-            return data_torch.reshape((self.n_group, self.d_inner // self.n_group))
+            return data_torch.reshape((self.n_group, self.mamba_d_ssm // self.n_group))
 
         return data_torch.squeeze()
 
@@ -3644,18 +3648,8 @@ class Mamba2Model(Model):
 @Model.register("FalconMamba2ForCausalLM")
 class FalconMamba2Model(Mamba2Model):
     model_arch = gguf.MODEL_ARCH.FALCON_MAMBA2
-    
-    @staticmethod
-    def _add_model_tensors():
-        # Register the MUP vector tensor in the model architecture
-        gguf.MODEL_TENSORS[gguf.MODEL_ARCH.FALCON_MAMBA2].append(gguf.MODEL_TENSOR.SSM_MUP_VEC)
-        # Register the tensor name
-        gguf.TENSOR_NAMES[gguf.MODEL_TENSOR.SSM_MUP_VEC] = "blk.{bid}.ssm_mup_vec"
 
     def __init__(self, *args, **kwargs):
-        # Add the model tensors for Falcon Mamba2
-        self._add_model_tensors()
-        
         # Set the hparam prefixes for Falcon Mamba2
         self.hparam_prefixes = ["mamba"]
         
@@ -3683,6 +3677,7 @@ class FalconMamba2Model(Mamba2Model):
         self.ssm_out_multiplier = self.find_hparam(["ssm_out_multiplier"], optional=True)
         self.mlp_multipliers = self.find_hparam(["mlp_multipliers"], optional=True)
         self.ssm_multipliers = self.find_hparam(["ssm_multipliers"], optional=True)
+        self.intermediate_size = self.find_hparam(["intermediate_size"])
 
     def find_hparam(self, keys: Iterable[str], *args, **kwargs) -> Any:
         prefixed = []
@@ -3754,6 +3749,7 @@ class FalconMamba2Model(Mamba2Model):
         
         self.gguf_writer.add_float32("falcon-mamba2.key_multiplier", self.hparams["key_multiplier"])
         self.gguf_writer.add_float32("falcon-mamba2.lm_head_multiplier", self.hparams["lm_head_multiplier"])
+        self.gguf_writer.add_float32("falcon-mamba2.embedding_multiplier", self.hparams["embedding_multiplier"])
         
         ## Validation ##
         assert self.hparams.get("hidden_act") in [None, "silu"], "Only SILU activation supported"
