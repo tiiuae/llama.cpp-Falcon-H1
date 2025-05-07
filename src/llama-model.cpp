@@ -951,8 +951,9 @@ void llama_model::load_hparams(llama_model_loader & ml) {
             } break;
         case LLM_ARCH_FALCON_MAMBA2:
             {
-                // Load vocab size
+                // Common parameters
                 ml.get_key(LLM_KV_VOCAB_SIZE,         hparams.vocab_size);
+                ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
 
                 // SSM parameters
                 ml.get_key(LLM_KV_MAMBA_D_SSM,        hparams.ssm_mamba_d_ssm);
@@ -962,6 +963,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_SSM_TIME_STEP_RANK, hparams.ssm_dt_rank);
                 ml.get_key(LLM_KV_SSM_GROUP_COUNT,    hparams.ssm_n_group);
                 ml.get_key(LLM_KV_SSM_HEAD_DIM,       hparams.ssm_head_dim);
+                ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_CHUNK_SIZE, hparams.chunk_size);
 
                 // Falcon Mamba2 parameters
                 ml.get_key(LLM_KV_ATTN_HEAD_DIM,      hparams.attn_head_dim);
@@ -2691,28 +2693,35 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
             // case LLM_ARCH_BAMBA:
             case LLM_ARCH_FALCON_MAMBA2:
                 {
-                    // mamba2 Mixer SSM params
+                    // Common
+                    const float layer_norm_epsilon = hparams.f_norm_rms_eps; // TODO layer_norm_epsilon
                     const int64_t hidden_size = hparams.n_embd; // hidden_size
-                    const int64_t ssm_intermediate_size   = hparams.ssm_mamba_d_ssm; // ssm_intermediate_size
-                    const int64_t ssm_conv_kernel_size     = hparams.ssm_d_conv; // ssm_conv_kernel_size
-                    const int64_t ssm_state_size    = hparams.ssm_d_state; // ssm_state_size
-                    const int64_t ssm_num_heads = hparams.ssm_dt_rank; // ssm_num_heads
-                    const int64_t ssm_n_groups    = hparams.ssm_n_group; // ssm_n_groups
-                    const int64_t ssm_conv_dim = ssm_intermediate_size + 2 * ssm_n_groups * ssm_state_size;
-                    const int64_t ssm_projection_size = ssm_intermediate_size + ssm_conv_dim + ssm_num_heads;
+                    const int64_t vocab_size = hparams.vocab_size; // vocab_size
+
+                    // mamba2 Mixer SSM params
+                    const int64_t ssm_conv_kernel_size  = hparams.ssm_d_conv; // ssm_conv_kernel_size
+                    const int64_t ssm_n_groups          = hparams.ssm_n_group; // ssm_n_groups
+                    const int64_t ssm_state_size        = hparams.ssm_d_state; // ssm_state_size
+                    const int64_t ssm_intermediate_size = hparams.ssm_mamba_d_ssm > 0 ? hparams.ssm_mamba_d_ssm : int(hparams.mamba_expand * hidden_size); // TODO expand
+                    const int64_t ssm_num_heads         = hparams.ssm_dt_rank; // ssm_num_heads
+                    const int64_t ssm_conv_dim          = ssm_intermediate_size + 2 * ssm_n_groups * ssm_state_size;
+                    const int64_t ssm_head_dim          = hparams.ssm_head_dim; // ssm_head_dim
+                    const bool ssm_rms_norm             = hparams.mamba_rms_norm;
+                    const int64_t ssm_chunk_size        = hparams.chunk_size;
+                    const int64_t ssm_projection_size   = ssm_intermediate_size + ssm_conv_dim + ssm_num_heads;
+                    const int64_t ssm_groups_time_state_size = ssm_n_groups * ssm_state_size; // groups_time_state_size
 
                     // attn params
                     const int64_t attn_num_attention_head = hparams.n_head(0); // rename to: attn_num_attention_head
-                    const int64_t attn_head_dim = hparams.attn_head_dim;
                     const int64_t attn_num_key_value_head = hparams.n_head_kv(0);
+                    const int64_t attn_head_dim = hparams.attn_head_dim > 0 ? hparams.attn_head_dim : hidden_size / attn_num_attention_head;
+                    const int64_t attn_num_key_value_groups = attn_num_attention_head / attn_num_key_value_head;
 
-                    const int64_t n_embd_k_gqa_i = hparams.n_embd_k_gqa(0); // it's always the same
-                    const int64_t n_embd_v_gqa_i = hparams.n_embd_v_gqa(0); // it's always the same
-                    const int64_t vocab_size = hparams.vocab_size;
+                    // ffn params
                     const int64_t ffn_intermediate_size = hparams.n_ff(0);
 
                     // embeddings
-                    tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, vocab_size}, 0);
+                    tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {hidden_size, vocab_size}, 0);
 
                     // output
                     {
@@ -3919,6 +3928,7 @@ void llama_model::print_info() const {
         LLAMA_LOG_INFO("%s: key_multiplier      = %f\n",     __func__, hparams.key_multiplier);
         LLAMA_LOG_INFO("%s: lm_head_multiplier  = %f\n",     __func__, hparams.lm_head_multiplier);
         LLAMA_LOG_INFO("%s: embedding_multiplier = %f\n",     __func__, hparams.embedding_multiplier);
+        LLAMA_LOG_INFO("%s: chunk_size          = %u\n",     __func__, hparams.chunk_size);
     }
 
     if (arch == LLM_ARCH_DEEPSEEK) {

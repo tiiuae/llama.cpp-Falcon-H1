@@ -167,6 +167,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_FALCON_MAMBA2_KEY_MULTIPLIER,           "%s.key_multiplier"           },
     { LLM_KV_FALCON_MAMBA2_LM_HEAD_MULTIPLIER,       "%s.lm_head_multiplier"       },
     { LLM_KV_FALCON_MAMBA2_EMBEDDING_MULTIPLIER,     "%s.embedding_multiplier"     },
+    { LLM_KV_FALCON_MAMBA2_MAMBA_CHUNK_SIZE,         "%s.ssm.mamba_chunk_size"     },
 
     { LLM_KV_WKV_HEAD_SIZE, "%s.wkv.head_size" },
 
