@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <cstring>
 
 /**
  * This the arbitrary data which will be passed to each callback.
@@ -27,9 +28,59 @@ static std::string ggml_ne_string(const ggml_tensor * t) {
     return str;
 }
 
+static void ggml_print_full_tensor(uint8_t * data, ggml_type type, const int64_t * ne, const size_t * nb) {
+    LOG("                                     [FULL TENSOR DUMP]\n");
+    
+    for (int64_t i3 = 0; i3 < ne[3]; i3++) {
+        LOG("                                     [\n");
+        for (int64_t i2 = 0; i2 < ne[2]; i2++) {
+            LOG("                                      [\n");
+            for (int64_t i1 = 0; i1 < ne[1]; i1++) {
+                LOG("                                       [");
+                for (int64_t i0 = 0; i0 < ne[0]; i0++) {
+                    size_t i = i3 * nb[3] + i2 * nb[2] + i1 * nb[1] + i0 * nb[0];
+                    float v;
+                    if (type == GGML_TYPE_F16) {
+                        v = ggml_fp16_to_fp32(*(ggml_fp16_t *) &data[i]);
+                    } else if (type == GGML_TYPE_F32) {
+                        v = *(float *) &data[i];
+                    } else if (type == GGML_TYPE_I32) {
+                        v = (float) *(int32_t *) &data[i];
+                    } else if (type == GGML_TYPE_I16) {
+                        v = (float) *(int16_t *) &data[i];
+                    } else if (type == GGML_TYPE_I8) {
+                        v = (float) *(int8_t *) &data[i];
+                    } else {
+                        GGML_ABORT("fatal error");
+                    }
+                    LOG("%12.4f", v);
+                    if (i0 < ne[0] - 1) LOG(", ");
+                }
+                LOG("],\n");
+            }
+            LOG("                                      ],\n");
+        }
+        LOG("                                     ]\n");
+    }
+}
+
 static void ggml_print_tensor(uint8_t * data, ggml_type type, const int64_t * ne, const size_t * nb, int64_t n) {
     GGML_ASSERT(n > 0);
     float sum = 0;
+    float min_val = 1e38f;
+    float max_val = -1e38f;
+    
+    // Count total elements in tensor
+    int64_t total_elements = 0;
+    for (int i = 0; i < GGML_MAX_DIMS; ++i) {
+        if (i == 0) {
+            total_elements = ne[i];
+        } else {
+            total_elements *= ne[i];
+        }
+    }
+    
+    // Process tensor data
     for (int64_t i3 = 0; i3 < ne[3]; i3++) {
         LOG("                                     [\n");
         for (int64_t i2 = 0; i2 < ne[2]; i2++) {
@@ -66,6 +117,8 @@ static void ggml_print_tensor(uint8_t * data, ggml_type type, const int64_t * ne
                     }
                     LOG("%12.4f", v);
                     sum += v;
+                    min_val = std::min(min_val, v);
+                    max_val = std::max(max_val, v);
                     if (i0 < ne[0] - 1) LOG(", ");
                 }
                 LOG("],\n");
@@ -73,7 +126,18 @@ static void ggml_print_tensor(uint8_t * data, ggml_type type, const int64_t * ne
             LOG("                                      ],\n");
         }
         LOG("                                     ]\n");
-        LOG("                                     sum = %f\n", sum);
+        
+        // If no elements were processed, reset min/max to avoid showing extreme values
+        if (total_elements == 0) {
+            min_val = 0.0f;
+            max_val = 0.0f;
+        } else if (min_val == 1e38f) {
+            // If min wasn't updated, reset it
+            min_val = 0.0f;
+            max_val = 0.0f;
+        }
+        
+        LOG("                                     sum = %f, min = %f, max = %f\n", sum, min_val, max_val);
     }
 }
 
@@ -120,7 +184,16 @@ static bool ggml_debug(struct ggml_tensor * t, bool ask, void * user_data) {
 
     if (!ggml_is_quantized(t->type)) {
         uint8_t * data = is_host ? (uint8_t *) t->data : cb_data->data.data();
-        ggml_print_tensor(data, t->type, t->ne, t->nb, 3);
+        
+        // Check if tensor name contains "inp_embd"
+        if (t->name && strstr(t->name, "XxxxXX") != nullptr) {
+            // Print the full tensor if name contains "inpL"
+            LOG("Found inpL tensor, printing full contents:\n");
+            ggml_print_full_tensor(data, t->type, t->ne, t->nb);
+        } else {
+            // Print the regular truncated view for other tensors
+            ggml_print_tensor(data, t->type, t->ne, t->nb, 3);
+        }
     }
 
     return true;
