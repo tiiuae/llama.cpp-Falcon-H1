@@ -3578,12 +3578,12 @@ class Mamba2Model(Model):
 
     def set_vocab(self):
         vocab_size = self.hparams["vocab_size"]
-        # Round vocab size to next multiple of 16
-        pad_vocab = self.hparams.get("pad_vocab_size_multiple", 16)
-        # pad using ceiling division
-        # ref: https://stackoverflow.com/a/17511341/22827863
-        vocab_size = -(vocab_size // -pad_vocab) * pad_vocab
-        self.hparams["vocab_size"] = vocab_size
+        # # Round vocab size to next multiple of 16
+        # pad_vocab = self.hparams.get("pad_vocab_size_multiple", 16)
+        # # pad using ceiling division
+        # # ref: https://stackoverflow.com/a/17511341/22827863
+        # vocab_size = -(vocab_size // -pad_vocab) * pad_vocab
+        # self.hparams["vocab_size"] = vocab_size
 
         if (self.dir_model / "tokenizer.model").is_file():
             self._set_vocab_sentencepiece()

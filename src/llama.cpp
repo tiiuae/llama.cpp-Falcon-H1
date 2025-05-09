@@ -1073,9 +1073,11 @@ static struct ggml_tensor * llm_build_mamba2(
         y = ggml_mul(ctx, y, ggml_silu(ctx, ggml_cont(ctx, z)));
         cb(y, "y (y = y * silu(z))", il);
 
-        // // grouped RMS norm
-        // y = ggml_reshape_4d(ctx, y, mamba_d_ssm / n_group, n_group, n_seq_tokens, n_seqs);
-        // y = llm_build_norm(ctx, y, hparams, model.layers[il].ssm_norm, NULL, LLM_NORM_RMS, cb, il);
+        if (hparams.mamba_rms_norm){
+        y = ggml_reshape_4d(ctx, y, mamba_d_ssm / n_group, n_group, n_seq_tokens, n_seqs);
+        y = llm_build_norm(ctx, y, hparams, model.layers[il].ssm_norm, NULL, LLM_NORM_RMS, cb, il);
+        }
+
         y = ggml_reshape_3d(ctx, y, mamba_d_ssm, n_seq_tokens, n_seqs);
         cb(y, "y (post reshape)", il);
 
