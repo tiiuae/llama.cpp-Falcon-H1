@@ -5400,7 +5400,7 @@ struct llm_build_context {
         return gf;
     }
 
-    struct ggml_cgraph * build_falcon_mamba2() {
+    struct ggml_cgraph * build_falcon_h1() {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, model.max_nodes(), false);
 
         struct ggml_tensor * cur;
@@ -8742,9 +8742,9 @@ static struct ggml_cgraph * llama_build_graph(
             {
                 result = llm.build_mamba(/* version */ 2);
             } break;
-        case LLM_ARCH_FALCON_MAMBA2:
+        case LLM_ARCH_FALCON_H1:
             {
-                result = llm.build_falcon_mamba2();
+                result = llm.build_falcon_h1();
             } break;
         case LLM_ARCH_XVERSE:
             {
@@ -8949,7 +8949,7 @@ static int llama_prepare_ubatch(
     const auto & cparams = lctx.cparams;
     const auto & hparams = lctx.model.hparams;
     const auto & model   = lctx.model;
-    // Only used for hybrid-recurrent models (e.g. Falcon mamba2)
+    // Only used for hybrid-recurrent models (e.g. Falcon-H1)
     const bool hybrid = llama_model_is_hybrid(&model);
     auto & kv_hybrid = lctx.kv_hybrid;
     llama_kv_slot_restorer kv_slot_restorer_hybrid(kv_hybrid);
@@ -9064,7 +9064,7 @@ static int llama_decode_impl(
     auto & kv_self = lctx.kv_self;
     llama_kv_slot_restorer kv_slot_restorer(kv_self);
 
-    // Only used for hybrid-recurrent models (e.g. Falcon mamba2)
+    // Only used for hybrid-recurrent models (e.g. Falcon-H1)
     const bool hybrid = llama_model_is_hybrid(&model);
     auto & kv_hybrid = lctx.kv_hybrid;
     llama_kv_slot_restorer kv_slot_restorer_hybrid(kv_hybrid);
@@ -9167,7 +9167,7 @@ static int llama_decode_impl(
 
         // plot the computation graph in dot format (for debugging purposes)
         // if (batch.pos[0]%100 == 0) {
-        //     ggml_graph_dump_dot(gf, NULL, "/home/ibrahim/FalconMamba2/outputs/Falcon-Mamba2-500M-Instruct-v1.0-F32-2Layers.dot");
+        //     ggml_graph_dump_dot(gf, NULL, "~/model.dot");
         // }
 
         // extract logits

@@ -55,7 +55,7 @@ uint32_t llama_hparams::n_embd_k_s(uint32_t il) const {
         return token_shift_count * n_embd;
     }
 
-    // For Falcon Mamba2, use the correct intermediate size
+    // For Falcon-H1, use the correct intermediate size
     uint32_t intermediate_size = ssm_mamba_d_ssm > 0 ? ssm_mamba_d_ssm : ssm_d_inner;
     
     // NOTE: since the first column of the conv_state is shifted out each time, it's not actually needed
@@ -72,7 +72,7 @@ uint32_t llama_hparams::n_embd_v_s(uint32_t il) const {
         return n_embd * wkv_head_size;
     }
 
-    // For Falcon Mamba2, account for the head dimension structure
+    // For Falcon-H1, account for the head dimension structure
     if (ssm_head_dim > 0) {
         return ssm_d_state * ssm_dt_rank * ssm_head_dim;
     }

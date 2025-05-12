@@ -603,10 +603,10 @@ class Model:
             res = "bert-bge"
         if chkhsh == "a6b57017d60e6edb4d88ecc2845188e0eb333a70357e45dcc9b53964a73bbae6":
             # ref: 
-            res = "falcon-mamba2"
+            res = "falcon-h1"
         if chkhsh == "60476e1243776c4fb1b993dbd7a5f15ac22f83c80afdf425fa5ae01c8d44ef86":
             # ref: 
-            res = "falcon-mamba2"
+            res = "falcon-h1"
         if chkhsh == "8e62295832751ca1e8f92f2226f403dea30dc5165e448b5bfa05af5340c64ec7":
             # ref: https://huggingface.co/BAAI/bge-large-zh-v1.5
             res = "bert-bge-large"
@@ -3645,9 +3645,9 @@ class Mamba2Model(Model):
         return data_torch.squeeze()
 
 
-@Model.register("FalconMamba2ForCausalLM")
-class FalconMamba2Model(Mamba2Model):
-    model_arch = gguf.MODEL_ARCH.FALCON_MAMBA2
+@Model.register("FalconH1ForCausalLM")
+class FalconH1Model(Mamba2Model):
+    model_arch = gguf.MODEL_ARCH.FALCON_H1
 
     def __init__(self, *args, **kwargs):
         # Set the hparam prefixes for Falcon Mamba2
@@ -3667,10 +3667,7 @@ class FalconMamba2Model(Mamba2Model):
         # Initialize any Falcon Mamba2 specific attributes
         self.has_attention = True  # Falcon Mamba2 has attention components
         
-        # Load SSM multipliers from hyperparameters
-        self.ssm_multipliers = self.find_hparam(["ssm_multipliers"], optional=True)
-        
-        # Load Falcon-Mamba2 multipliers from hyperparameters
+        # Load Falcon-H1 multipliers from hyperparameters
         self.attention_in_multiplier = self.find_hparam(["attention_in_multiplier"], optional=True)
         self.attention_out_multiplier = self.find_hparam(["attention_out_multiplier"], optional=True)
         self.ssm_in_multiplier = self.find_hparam(["ssm_in_multiplier"], optional=True)
@@ -3736,8 +3733,6 @@ class FalconMamba2Model(Mamba2Model):
         self.gguf_writer.add_ssm_group_count(self.n_group)
         self.gguf_writer.add_ssm_inner_size(self.d_inner)
         self.gguf_writer.add_ssm_head_dim(d_head := self.find_hparam(["d_head"]))
-        # NOTE: The mamba_dt_rank is _not_ the right field for how this is used
-        #   in llama.cpp
         self.gguf_writer.add_ssm_time_step_rank(self.find_hparam(["n_heads"]))
 
         ## Attention params ##
@@ -3746,10 +3741,11 @@ class FalconMamba2Model(Mamba2Model):
         self.gguf_writer.add_layer_norm_rms_eps(self.hparams["rms_norm_eps"])
         self.gguf_writer.add_key_length(self.hparams["head_dim"])
         self.gguf_writer.add_value_length(self.hparams["head_dim"])
-        
-        self.gguf_writer.add_float32("falcon-mamba2.key_multiplier", self.hparams["key_multiplier"])
-        self.gguf_writer.add_float32("falcon-mamba2.lm_head_multiplier", self.hparams["lm_head_multiplier"])
-        self.gguf_writer.add_float32("falcon-mamba2.embedding_multiplier", self.hparams["embedding_multiplier"])
+        self.gguf_writer.add_float32("falcon-h1.key_multiplier", self.hparams["key_multiplier"])
+
+        ## Other params
+        self.gguf_writer.add_float32("falcon-h1.lm_head_multiplier", self.hparams["lm_head_multiplier"])
+        self.gguf_writer.add_float32("falcon-h1.embedding_multiplier", self.hparams["embedding_multiplier"])
         
         ## Validation ##
         assert self.hparams.get("hidden_act") in [None, "silu"], "Only SILU activation supported"
@@ -3757,46 +3753,34 @@ class FalconMamba2Model(Mamba2Model):
 
         
         # Add Falcon Mamba2 specific configuration
-        self.gguf_writer.add_uint32("falcon-mamba2.ssm.mamba_chunk_size", self.hparams["mamba_chunk_size"])
-        self.gguf_writer.add_uint32("falcon-mamba2.attention.head_dim", self.hparams["head_dim"])
-        self.gguf_writer.add_uint32("falcon-mamba2.ssm.mamba_d_ssm", self.hparams["mamba_d_ssm"])
-        self.gguf_writer.add_uint32("falcon-mamba2.num_attention_heads", self.find_hparam(["num_attention_heads"]))
-        self.gguf_writer.add_uint32("falcon-mamba2.num_key_value_heads", 
+        self.gguf_writer.add_uint32("falcon-h1.ssm.mamba_chunk_size", self.hparams["mamba_chunk_size"])
+        self.gguf_writer.add_uint32("falcon-h1.attention.head_dim", self.hparams["head_dim"])
+        self.gguf_writer.add_uint32("falcon-h1.ssm.mamba_d_ssm", self.hparams["mamba_d_ssm"])
+        self.gguf_writer.add_uint32("falcon-h1.num_attention_heads", self.find_hparam(["num_attention_heads"]))
+        self.gguf_writer.add_uint32("falcon-h1.num_key_value_heads", 
                                     self.find_hparam(["num_key_value_heads"], optional=True) or 
                                     self.find_hparam(["num_attention_heads"]))
         
         # Add multipliers as metadata instead of tensors
-        self.gguf_writer.add_float32("falcon-mamba2.attention_in_multiplier", self.attention_in_multiplier)
-        self.gguf_writer.add_float32("falcon-mamba2.attention_out_multiplier", self.attention_out_multiplier)
-        self.gguf_writer.add_float32("falcon-mamba2.ssm_in_multiplier", self.ssm_in_multiplier)
-        self.gguf_writer.add_float32("falcon-mamba2.ssm_out_multiplier", self.ssm_out_multiplier)
+        self.gguf_writer.add_float32("falcon-h1.attention_in_multiplier", self.attention_in_multiplier)
+        self.gguf_writer.add_float32("falcon-h1.attention_out_multiplier", self.attention_out_multiplier)
+        self.gguf_writer.add_float32("falcon-h1.ssm_in_multiplier", self.ssm_in_multiplier)
+        self.gguf_writer.add_float32("falcon-h1.ssm_out_multiplier", self.ssm_out_multiplier)
         
         # Add MLP multipliers
         if isinstance(self.mlp_multipliers, (list, tuple)) and len(self.mlp_multipliers) == 2:
-            self.gguf_writer.add_float32("falcon-mamba2.mlp_gate_multiplier", self.mlp_multipliers[0])
-            self.gguf_writer.add_float32("falcon-mamba2.mlp_down_multiplier", self.mlp_multipliers[1])
+            self.gguf_writer.add_float32("falcon-h1.mlp_gate_multiplier", self.mlp_multipliers[0])
+            self.gguf_writer.add_float32("falcon-h1.mlp_down_multiplier", self.mlp_multipliers[1])
         
         # Add has MuP flag if SSM multipliers are present
         if self.ssm_multipliers is not None:
-            self.gguf_writer.add_bool("falcon-mamba2.ssm.has_mup", True)
+            self.gguf_writer.add_bool("falcon-h1.ssm.has_mup", True)
         
         # Add any other Falcon Mamba2 specific configuration
-        falcon_specific_params = [
-            ("mamba_use_mlp", "falcon-mamba2.mamba_use_mlp", "bool"),
-            ("mamba_norm_before_gate", "falcon-mamba2.mamba_norm_before_gate", "bool"),
-            ("mamba_rms_norm", "falcon-mamba2.mamba_rms_norm", "bool"),
-            ("rope_theta", "falcon-mamba2.rope_theta", "float"),
-        ]
-        
-        for param_name, gguf_key, param_type in falcon_specific_params:
-            value = self.find_hparam([param_name], optional=True)
-            if value is not None:
-                if param_type == "bool":
-                    self.gguf_writer.add_bool(gguf_key, value)
-                elif param_type == "float":
-                    self.gguf_writer.add_float32(gguf_key, value)
-                elif param_type == "uint32":
-                    self.gguf_writer.add_uint32(gguf_key, value)
+        self.gguf_writer.add_bool("falcon-h1.mamba_use_mlp", self.find_hparam(["mamba_use_mlp"], optional=True))
+        self.gguf_writer.add_bool("falcon-h1.mamba_norm_before_gate", self.find_hparam(["mamba_norm_before_gate"], optional=True))
+        self.gguf_writer.add_bool("falcon-h1.mamba_rms_norm", self.find_hparam(["mamba_rms_norm"], optional=True))
+        self.gguf_writer.add_float32("falcon-h1.rope_theta", self.find_hparam(["rope_theta"], optional=True))
 
 
 @Model.register("CohereForCausalLM")

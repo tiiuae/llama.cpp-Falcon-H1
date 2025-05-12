@@ -76,14 +76,14 @@ bool llama_kv_cache_init(
         uint32_t n_embd_k_gqa;
         uint32_t n_embd_v_gqa;
 
-        // For FalconMamba2 we have all layers reccurent, so for the kv_self
+        // For Falcon-H1 we have all layers reccurent, so for the kv_self
         // we will use cache.recurrent to init cache=false for attention layers
         // and cache.recurrent=true for recurrent layers
-        if (model.arch == LLM_ARCH_FALCON_MAMBA2 && !cache.recurrent) {
+        if (model.arch == LLM_ARCH_FALCON_H1 && !cache.recurrent) {
             n_embd_k_gqa = hparams.n_embd_k_gqa(i);
             n_embd_v_gqa = hparams.n_embd_v_gqa(i);
         }
-        else if (model.arch == LLM_ARCH_FALCON_MAMBA2 && cache.recurrent)
+        else if (model.arch == LLM_ARCH_FALCON_H1 && cache.recurrent)
         {
             n_embd_k_gqa = hparams.n_embd_k_s(i);
             n_embd_v_gqa = hparams.n_embd_v_s(i);
@@ -113,12 +113,12 @@ bool llama_kv_cache_init(
         // If this is a hybrid model, there will be two caches, one for
         // recurrent layers and one for attention layers. The tensors in the
         // cache only need to be fully allocated for the correct layers.
-        // For FalconMamba2, we need to use model arch because reccurent
+        // For Falcon-H1, we need to use model arch because reccurent
         // layers are all true
         const uint32_t tensor_dim = (
             (cache.recurrent && hparams.recurrent_layer(i))   ||
             (!cache.recurrent && !hparams.recurrent_layer(i)) ||
-            (model.arch == LLM_ARCH_FALCON_MAMBA2)
+            (model.arch == LLM_ARCH_FALCON_H1)
             ? kv_size : 0);
 
         ggml_tensor * k = ggml_new_tensor_1d(ctx, type_k, n_embd_k_gqa*tensor_dim);

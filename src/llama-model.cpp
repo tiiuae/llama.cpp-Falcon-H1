@@ -949,7 +949,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                     default: type = LLM_TYPE_UNKNOWN;
                 }
             } break;
-        case LLM_ARCH_FALCON_MAMBA2:
+        case LLM_ARCH_FALCON_H1:
             {
                 // Common parameters
                 ml.get_key(LLM_KV_VOCAB_SIZE,         hparams.vocab_size);
@@ -963,24 +963,24 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_SSM_TIME_STEP_RANK, hparams.ssm_dt_rank);
                 ml.get_key(LLM_KV_SSM_GROUP_COUNT,    hparams.ssm_n_group);
                 ml.get_key(LLM_KV_SSM_HEAD_DIM,       hparams.ssm_head_dim);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_CHUNK_SIZE, hparams.chunk_size);
+                ml.get_key(LLM_KV_FALCON_H1_MAMBA_CHUNK_SIZE, hparams.chunk_size);
 
-                // Falcon Mamba2 parameters
+                // Falcon-H1 parameters
                 ml.get_key(LLM_KV_ATTN_HEAD_DIM,      hparams.attn_head_dim);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_USE_MLP, hparams.mamba_use_mlp);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_ATTENTION_IN_MULTIPLIER, hparams.attention_in_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_ATTENTION_OUT_MULTIPLIER, hparams.attention_out_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_SSM_IN_MULTIPLIER, hparams.ssm_in_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_SSM_OUT_MULTIPLIER, hparams.ssm_out_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_MLP_GATE_MULTIPLIER, hparams.mlp_gate_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_MLP_DOWN_MULTIPLIER, hparams.mlp_down_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_SSM_HAS_MUP, hparams.ssm_has_mup);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_NORM_BEFORE_GATE, hparams.mamba_norm_before_gate);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_MAMBA_RMS_NORM, hparams.mamba_rms_norm);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_ROPE_THETA, hparams.rope_theta);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_KEY_MULTIPLIER, hparams.key_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_LM_HEAD_MULTIPLIER, hparams.lm_head_multiplier);
-                ml.get_key(LLM_KV_FALCON_MAMBA2_EMBEDDING_MULTIPLIER, hparams.embedding_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_USE_MLP, hparams.mamba_use_mlp);
+                ml.get_key(LLM_KV_FALCON_H1_ATTENTION_IN_MULTIPLIER, hparams.attention_in_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_ATTENTION_OUT_MULTIPLIER, hparams.attention_out_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_SSM_IN_MULTIPLIER, hparams.ssm_in_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_SSM_OUT_MULTIPLIER, hparams.ssm_out_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_MLP_GATE_MULTIPLIER, hparams.mlp_gate_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_MLP_DOWN_MULTIPLIER, hparams.mlp_down_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_SSM_HAS_MUP, hparams.ssm_has_mup);
+                ml.get_key(LLM_KV_FALCON_H1_MAMBA_NORM_BEFORE_GATE, hparams.mamba_norm_before_gate);
+                ml.get_key(LLM_KV_FALCON_H1_MAMBA_RMS_NORM, hparams.mamba_rms_norm);
+                ml.get_key(LLM_KV_FALCON_H1_ROPE_THETA, hparams.rope_theta);
+                ml.get_key(LLM_KV_FALCON_H1_KEY_MULTIPLIER, hparams.key_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_LM_HEAD_MULTIPLIER, hparams.lm_head_multiplier);
+                ml.get_key(LLM_KV_FALCON_H1_EMBEDDING_MULTIPLIER, hparams.embedding_multiplier);
 
                 switch (hparams.n_layer) {
                     case 36:
@@ -2691,7 +2691,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                     }
                 } break;
             // case LLM_ARCH_BAMBA:
-            case LLM_ARCH_FALCON_MAMBA2:
+            case LLM_ARCH_FALCON_H1:
                 {
                     // Common
                     const float layer_norm_epsilon = hparams.f_norm_rms_eps; // TODO layer_norm_epsilon
@@ -3913,7 +3913,7 @@ void llama_model::print_info() const {
     // general kv
     LLAMA_LOG_INFO("%s: general.name     = %s\n",    __func__, name.c_str());
 
-    if (arch == LLM_ARCH_FALCON_MAMBA2) {
+    if (arch == LLM_ARCH_FALCON_H1) {
         LLAMA_LOG_INFO("%s: mlp_gate_multiplier = %f\n",     __func__, hparams.mlp_gate_multiplier);
         LLAMA_LOG_INFO("%s: mlp_down_multiplier = %f\n",     __func__, hparams.mlp_down_multiplier);
         LLAMA_LOG_INFO("%s: attention_in_multiplier  = %f\n",     __func__, hparams.attention_in_multiplier);
@@ -4142,7 +4142,7 @@ enum llama_rope_type llama_model_rope_type(const struct llama_model * model) {
         case LLM_ARCH_ORION:
         case LLM_ARCH_INTERNLM2:
         case LLM_ARCH_MINICPM:
-        case LLM_ARCH_FALCON_MAMBA2:
+        case LLM_ARCH_FALCON_H1:
         case LLM_ARCH_XVERSE:
         case LLM_ARCH_COMMAND_R:
         case LLM_ARCH_COHERE2:
@@ -4285,14 +4285,14 @@ bool llama_model_is_recurrent(const struct llama_model * model) {
         case LLM_ARCH_MAMBA2: return true;
         case LLM_ARCH_RWKV6:  return true;
         case LLM_ARCH_RWKV6QWEN2: return true;
-        case LLM_ARCH_FALCON_MAMBA2: return true;
+        case LLM_ARCH_FALCON_H1: return true;
         default:              return false;
     }
 }
 
 bool llama_model_is_hybrid(const struct llama_model * model) {
     switch (model->arch) {
-        case LLM_ARCH_FALCON_MAMBA2:
+        case LLM_ARCH_FALCON_H1:
             return true;
         default:
             return false;

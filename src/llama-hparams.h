@@ -94,7 +94,7 @@ struct llama_hparams {
     uint32_t ssm_head_dim   = 0;
     uint32_t ssm_mamba_d_ssm = 0;
 
-    // Falcon Mamba2 specific parameters
+    // Falcon-H1 specific parameters
     uint32_t attn_head_dim            = 0;
     bool     mamba_use_mlp            = false;
     bool     mamba_norm_before_gate   = false;
