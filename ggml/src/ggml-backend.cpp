@@ -1464,7 +1464,7 @@ ggml_backend_sched_t ggml_backend_sched_new(
 
     // initialize hash table
     // FIXME: needs to be size*2 to account for leafs (do it in graph_split instead)
-    sched->hash_set    = ggml_hash_set_new(graph_size);
+    sched->hash_set    = ggml_hash_set_new(graph_size + 400); // the + 400 is for Falcon-H1-34B
     sched->hv_tensor_backend_ids = (int *) malloc(sched->hash_set.size * sizeof(sched->hv_tensor_backend_ids[0]));
     sched->hv_tensor_copies      = (ggml_tensor **) malloc(sched->hash_set.size * sched->n_backends * sched->n_copies * sizeof(struct ggml_tensor *));
 
