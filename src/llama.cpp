@@ -1044,15 +1044,15 @@ static struct ggml_tensor * llm_build_mamba2(
         cb(C, "C", il);
 
         // {n_head, n_seq_tokens, n_seqs}
-        dt = ggml_add(ctx, dt, model.layers[il].ssm_dt_b);
+        dt = ggml_add(ctx, ggml_cont(ctx, dt), model.layers[il].ssm_dt_b);
         cb(dt, "dt", il);
 
-        struct ggml_tensor * ssm_ids = ggml_view_1d(ctx, state_copy, n_seqs, 0);
+        struct ggml_tensor * ssm_ids = ggml_view_1d(ctx, ggml_cont(ctx, state_copy), n_seqs, 0);
         cb(ssm_ids, "ssm_ids", il);
 
         // TODO: use semistructured matrices to implement state-space duality
         // => {mamba_d_ssm, n_seq_tokens, n_seqs} and {d_state, mamba_d_ssm, n_seqs}
-        struct ggml_tensor * y_ssm = ggml_ssm_scan(ctx, ggml_cont(ctx, ssm), x, dt, model.layers[il].ssm_a, B, C, ssm_ids);
+        struct ggml_tensor * y_ssm = ggml_ssm_scan(ctx, ssm, x, dt, model.layers[il].ssm_a, B, C, ssm_ids);
         cb(y_ssm, "y_ssm (post scan)", il);
 
         // store last states
